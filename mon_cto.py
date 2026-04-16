@@ -10,7 +10,7 @@ from google.oauth2.service_account import Credentials
 st.set_page_config(layout="wide")
 
 # 🔗 L'ID DE TON GOOGLE SHEET
-ID_SHEET = "1vTVsBPRwm4RlBiWyRJlw1GTKnYRyFweDEv1rkbgcF2E-tXJhMxa5i2qaYmX6wqZ-q2k8ldYKpdQ3oPG"
+ID_SHEET = "14sSa2p27u2oY9EsJxaNP6CFX4HUznYJojnPprI6vDBY"
 FICHIER_HISTORIQUE = "historique_patrimoine.csv"
 
 st.title("🌍 Mon Patrimoine Global (Sécurisé)")
