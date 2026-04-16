@@ -7,34 +7,46 @@ from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 
-st.set_page_config(layout="wide", page_title="Mon Patrimoine Pro - V11")
+# Configuration de la page (doit toujours être en premier)
+st.set_page_config(layout="wide", page_title="Mon Patrimoine Pro")
 
 # 🔗 L'ID DE TON GOOGLE SHEET
 ID_SHEET = "14sSa2p27u2oY9EsJxaNP6CFX4HUznYJojnPprI6vDBY"
 FICHIER_HISTORIQUE = "historique_patrimoine.csv"
 
-# --- 1. FONCTIONS DE CONNEXION ---
+# ==========================================
+# 1. FONCTIONS DE CONNEXION GOOGLE SHEETS
+# ==========================================
 @st.cache_resource
 def connecter_client():
+    """Établit la connexion avec l'API Google Sheets via les secrets Streamlit."""
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
     return gspread.authorize(creds).open_by_key(ID_SHEET)
 
 def charger_donnees():
+    """Charge le premier onglet (Portefeuille)."""
     try:
         sheet = connecter_client().get_worksheet(0)
         data = sheet.get_all_records(value_render_option='UNFORMATTED_VALUE')
-        if not data: return []
+        
+        if not data:
+            return []
+            
         df_sheet = pd.DataFrame(data)
+        
+        # Sécurité sur les chiffres (virgules vs points)
         for col in ["Quantité", "PRU"]:
             if col in df_sheet.columns:
                 df_sheet[col] = pd.to_numeric(df_sheet[col].astype(str).str.replace(',', '.'), errors='coerce')
+                
         return df_sheet.dropna(subset=["Ticker"]).to_dict('records')
     except Exception as e:
         st.error(f"Erreur de lecture Portefeuille : {e}")
         return []
 
 def sauvegarder_donnees(portefeuille):
+    """Sauvegarde les modifications du portefeuille dans le premier onglet."""
     try:
         df = pd.DataFrame(portefeuille)
         sheet = connecter_client().get_worksheet(0)
@@ -44,6 +56,7 @@ def sauvegarder_donnees(portefeuille):
         st.error(f"Erreur de sauvegarde Portefeuille : {e}")
 
 def charger_transactions():
+    """Charge le second onglet (Transactions)."""
     try:
         sheet = connecter_client().worksheet("Transactions")
         data = sheet.get_all_records(value_render_option='UNFORMATTED_VALUE')
@@ -52,16 +65,18 @@ def charger_transactions():
         return pd.DataFrame()
 
 def sauvegarder_transactions(df_trans):
+    """Sauvegarde les modifications de l'historique dans le second onglet."""
     try:
         sheet = connecter_client().worksheet("Transactions")
         sheet.clear()
         df_save = df_trans.copy()
         sheet.update([df_save.columns.values.tolist()] + df_save.values.tolist())
-        st.success("✅ Historique mis à jour !")
+        st.success("✅ Historique mis à jour dans Google Sheets !")
     except Exception as e:
         st.error(f"Erreur de sauvegarde Transactions : {e}")
 
 def ajouter_transaction(date, t_type, ticker, qte, prix, frais, compte):
+    """Ajoute une ligne unique à la fin de l'onglet Transactions."""
     try:
         sheet = connecter_client().worksheet("Transactions")
         sheet.append_row([date, t_type, ticker.upper(), qte, prix, frais, compte])
@@ -70,6 +85,9 @@ def ajouter_transaction(date, t_type, ticker, qte, prix, frais, compte):
         st.error(f"Erreur d'ajout transaction : {e}")
         return False
 
+# ==========================================
+# 2. FONCTIONS DE L'HISTORIQUE (LIGNE DE TEMPS)
+# ==========================================
 def charger_historique():
     if os.path.exists(FICHIER_HISTORIQUE):
         return pd.read_csv(FICHIER_HISTORIQUE)
@@ -78,34 +96,47 @@ def charger_historique():
 def enregistrer_snapshot(valeur_totale):
     df_hist = charger_historique()
     date_jour = datetime.now().strftime("%Y-%m-%d")
+    
+    # On écrase la donnée d'aujourd'hui si elle existe déjà
     df_hist = df_hist[df_hist["Date"] != date_jour]
+    
     nouvelle_ligne = pd.DataFrame([{"Date": date_jour, "Patrimoine Total (€)": valeur_totale}])
     df_hist = pd.concat([df_hist, nouvelle_ligne], ignore_index=True)
     df_hist = df_hist.sort_values(by="Date")
     df_hist.to_csv(FICHIER_HISTORIQUE, index=False)
 
 def style_plus_value(val):
-    if pd.isna(val): return ''
-    if val > 0: return 'color: #28a745; font-weight: bold'
-    elif val < 0: return 'color: #dc3545; font-weight: bold'
+    """Fonction pour colorer les chiffres en vert ou rouge."""
+    if pd.isna(val):
+        return ''
+    if val > 0:
+        return 'color: #28a745; font-weight: bold'
+    elif val < 0:
+        return 'color: #dc3545; font-weight: bold'
     return 'color: #6c757d'
 
-# --- LISTES GLOBALES ---
+# ==========================================
+# 3. VARIABLES GLOBALES & SÉCURITÉ
+# ==========================================
 LISTE_COMPTES = ["CTO", "PEA", "Crypto", "Espèce", "Autre"]
 LISTE_MOTIFS = ["ACHAT", "VENTE", "DIVIDENDE", "PAIEMENT", "DÉPÔT", "RETRAIT"]
 
-# --- 2. SÉCURITÉ ---
 st.sidebar.header("🔐 Accès Restreint")
 mot_de_passe_saisi = st.sidebar.text_input("Mot de passe pour modifier", type="password")
+
 try:
     est_autorise = (mot_de_passe_saisi == st.secrets["APP_PASSWORD"])
 except:
     est_autorise = False
-    st.sidebar.error("⚠️ Clé 'APP_PASSWORD' manquante.")
+    st.sidebar.error("⚠️ Clé 'APP_PASSWORD' manquante dans les Secrets.")
 
-# --- NAVIGATION ---
+# Menu de Navigation
 st.sidebar.divider()
-page = st.sidebar.radio("Navigation", ["📊 Portefeuille Global", "📜 Historique des Transactions", "📈 Bilan & Performance (Compta)"])
+page = st.sidebar.radio("Navigation", [
+    "📊 Portefeuille Global", 
+    "📜 Historique des Transactions", 
+    "📈 Bilan & Performance (Compta)"
+])
 
 # ==========================================
 # PAGE 1 : PORTEFEUILLE GLOBAL
@@ -113,9 +144,12 @@ page = st.sidebar.radio("Navigation", ["📊 Portefeuille Global", "📜 Histori
 if page == "📊 Portefeuille Global":
     st.title("🌍 Mon Patrimoine Global")
     
-    if est_autorise: st.sidebar.success("Mode Édition Activé")
-    else: st.sidebar.info("Mode consultation actif.")
+    if est_autorise:
+        st.sidebar.success("Mode Édition Activé")
+    else:
+        st.sidebar.info("Mode consultation actif.")
 
+    # Chargement en mémoire
     if 'portefeuille' not in st.session_state:
         st.session_state.portefeuille = charger_donnees()
 
@@ -124,42 +158,58 @@ if page == "📊 Portefeuille Global":
         st.session_state.portefeuille = charger_donnees()
         st.rerun()
 
+    # Formulaire Protégé
     if est_autorise:
         with st.sidebar.form("ajout_ligne", clear_on_submit=True):
             type_compte = st.selectbox("Choix du Compte", LISTE_COMPTES)
             nouveau_ticker = st.text_input("Symbole (ex: AI.PA)")
             nouvelle_quantite_str = st.text_input("Quantité", value="0")
             nouveau_pru_str = st.text_input("PRU (€)", value="0")
+            
             if st.form_submit_button("Ajouter"):
                 try:
                     nouvelle_action = {
-                        "Compte": type_compte, "Ticker": nouveau_ticker.upper().strip(),
+                        "Compte": type_compte, 
+                        "Ticker": nouveau_ticker.upper().strip(),
                         "Quantité": float(nouvelle_quantite_str.replace(',', '.')),
                         "PRU": float(nouveau_pru_str.replace(',', '.'))
                     }
                     st.session_state.portefeuille.append(nouvelle_action)
                     sauvegarder_donnees(st.session_state.portefeuille)
                     st.rerun()
-                except: st.error("Chiffres invalides !")
+                except ValueError:
+                    st.error("Chiffres invalides !")
+    else:
+        st.sidebar.warning("🔒 Saisie verrouillée")
 
+    # Éditeur Protégé
     if est_autorise:
         with st.expander("🛠️ Gérer mes actifs (Modifier ou Supprimer)"):
             df_base = pd.DataFrame(st.session_state.portefeuille)
-            if df_base.empty: df_base = pd.DataFrame(columns=["Compte", "Ticker", "Quantité", "PRU"])
+            if df_base.empty:
+                df_base = pd.DataFrame(columns=["Compte", "Ticker", "Quantité", "PRU"])
+                
             df_modifie = st.data_editor(df_base, num_rows="dynamic", use_container_width=True, key="editeur")
+            
             if not df_base.equals(df_modifie):
                 st.session_state.portefeuille = df_modifie.to_dict('records')
                 sauvegarder_donnees(st.session_state.portefeuille)
                 st.rerun()
 
+    # Affichage et Récupération des prix
     if not st.session_state.portefeuille:
         st.info("Ton portefeuille est vide.")
     else:
         df = pd.DataFrame(st.session_state.portefeuille)
-        with st.spinner("Analyse du marché..."):
-            try: taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
-            except: taux_usd_eur = 0.92
+        
+        with st.spinner("Analyse du marché en cours..."):
+            try: 
+                taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
+            except: 
+                taux_usd_eur = 0.92
+                
             cours_actuels, devises, dividendes, objectifs = [], [], [], []
+            
             for ticker in df["Ticker"]:
                 try:
                     data = yf.Ticker(str(ticker).strip().upper())
@@ -167,54 +217,88 @@ if page == "📊 Portefeuille Global":
                     devise = data.fast_info.get("currency", "EUR")
                     div_local = data.info.get('dividendRate', 0) or 0
                     obj_local = data.info.get('targetMeanPrice', 0) or 0
+                    
                     coef = taux_usd_eur if devise == "USD" else 1
+                        
                     cours_actuels.append(prix_local * coef)
-                    devises.append(devise); dividendes.append(div_local * coef); objectifs.append(obj_local * coef)
+                    devises.append(devise)
+                    dividendes.append(div_local * coef)
+                    objectifs.append(obj_local * coef)
                 except:
-                    cours_actuels.append(0); devises.append("Err"); dividendes.append(0); objectifs.append(0)
+                    cours_actuels.append(0)
+                    devises.append("Err")
+                    dividendes.append(0)
+                    objectifs.append(0)
 
+        # Calculs de la vue Globale
         df["Cours Actuel (€)"] = cours_actuels
         df["Valeur Investie (€)"] = df["Quantité"] * df["PRU"]
         df["Valeur Actuelle (€)"] = df["Quantité"] * df["Cours Actuel (€)"]
         df["Plus-Value (%)"] = ((df["Cours Actuel (€)"] - df["PRU"]) / df["PRU"] * 100).fillna(0)
         df["Rente Annuelle (€)"] = df["Quantité"] * dividendes
+        
+        # Calculs du Potentiel
         df["Objectif (€)"] = objectifs
         df["Potentiel (%)"] = df.apply(lambda r: ((r["Objectif (€)"] - r["Cours Actuel (€)"]) / r["Cours Actuel (€)"] * 100) if r["Objectif (€)"] > 0 else 0, axis=1)
         df["Potentiel / PRU (%)"] = df.apply(lambda r: ((r["Objectif (€)"] - r["PRU"]) / r["PRU"] * 100) if r["Objectif (€)"] > 0 and r["PRU"] > 0 else 0, axis=1)
 
+        # ---------------------------
+        # AFFICHAGES GRAPHIQUES VUE 1
+        # ---------------------------
         st.header("📊 Vue Détaillée")
-        t_inv, t_act = df["Valeur Investie (€)"].sum(), df["Valeur Actuelle (€)"].sum()
+        t_inv = df["Valeur Investie (€)"].sum()
+        t_act = df["Valeur Actuelle (€)"].sum()
+        
         c1, c2, c3 = st.columns(3)
-        c1.metric("Patrimoine", f"{t_act:.2f} €")
-        c2.metric("Investi", f"{t_inv:.2f} €")
-        c3.metric("Performance", f"{(t_act-t_inv):.2f} €", f"{((t_act/t_inv-1)*100 if t_inv>0 else 0):.2f} %")
+        c1.metric("Patrimoine Total", f"{t_act:.2f} €")
+        c2.metric("Total Investi", f"{t_inv:.2f} €")
+        c3.metric("Performance Globale", f"{(t_act-t_inv):.2f} €", f"{((t_act/t_inv-1)*100 if t_inv>0 else 0):.2f} %")
         
         st.subheader("💸 Ma Machine à Cash")
         total_div_an = df["Rente Annuelle (€)"].sum()
+        
         c4, c5, c6 = st.columns(3)
         c4.metric("Rente Annuelle", f"{total_div_an:.2f} € / an")
         c5.metric("Soit par mois", f"{(total_div_an / 12):.2f} € / mois")
         c6.metric("Yield on Cost", f"{(total_div_an / t_inv * 100 if t_inv>0 else 0):.2f} %")
         
         st.divider()
+        
         cols_tab = ["Compte", "Ticker", "Quantité", "PRU", "Cours Actuel (€)", "Objectif (€)", "Potentiel (%)", "Potentiel / PRU (%)", "Valeur Actuelle (€)", "Plus-Value (%)", "Rente Annuelle (€)"]
+        
         st.dataframe(df[cols_tab].style.format({
-            "Quantité": "{:.4f}", "PRU": "{:.2f} €", "Cours Actuel (€)": "{:.2f} €", "Objectif (€)": "{:.2f} €",
-            "Potentiel (%)": "{:.2f} %", "Potentiel / PRU (%)": "{:.2f} %", "Valeur Actuelle (€)": "{:.2f} €",
-            "Plus-Value (%)": "{:.2f} %", "Rente Annuelle (€)": "{:.2f} €"
+            "Quantité": "{:.4f}", 
+            "PRU": "{:.2f} €", 
+            "Cours Actuel (€)": "{:.2f} €", 
+            "Objectif (€)": "{:.2f} €",
+            "Potentiel (%)": "{:.2f} %", 
+            "Potentiel / PRU (%)": "{:.2f} %", 
+            "Valeur Actuelle (€)": "{:.2f} €",
+            "Plus-Value (%)": "{:.2f} %", 
+            "Rente Annuelle (€)": "{:.2f} €"
         }).map(style_plus_value, subset=['Plus-Value (%)', 'Potentiel (%)', 'Potentiel / PRU (%)']), use_container_width=True)
 
         st.divider()
+        
         col_g, col_d = st.columns(2)
         with col_g:
-            st.plotly_chart(px.sunburst(df, path=['Compte', 'Ticker'], values='Valeur Actuelle (€)', title="Répartition"), use_container_width=True)
+            st.plotly_chart(px.sunburst(df, path=['Compte', 'Ticker'], values='Valeur Actuelle (€)', title="Répartition par Actif"), use_container_width=True)
+            
         with col_d:
-            st.subheader("📈 Évolution")
-            if est_autorise and st.button("📸 Snapshot du jour"):
-                enregistrer_snapshot(t_act); st.success("Enregistré !")
+            st.subheader("📈 Évolution du Patrimoine")
+            if est_autorise:
+                if st.button("📸 Enregistrer Snapshot du jour"):
+                    enregistrer_snapshot(t_act)
+                    st.success("Snapshot enregistré !")
+            else:
+                st.info("🔒 Mot de passe requis pour enregistrer l'historique.")
+                
             df_h = charger_historique()
             if not df_h.empty:
-                st.plotly_chart(px.line(df_h, x="Date", y="Patrimoine Total (€)", markers=True).update_traces(fill='tozeroy', line_color='#00b4d8'), use_container_width=True)
+                fig = px.line(df_h, x="Date", y="Patrimoine Total (€)", markers=True)
+                fig.update_traces(fill='tozeroy', line_color='#00b4d8')
+                st.plotly_chart(fig, use_container_width=True)
+
 
 # ==========================================
 # PAGE 2 : HISTORIQUE DES TRANSACTIONS
@@ -226,84 +310,175 @@ elif page == "📜 Historique des Transactions":
         with st.expander("➕ Enregistrer une nouvelle transaction", expanded=True):
             with st.form("form_transac", clear_on_submit=True):
                 c1, c2, c3 = st.columns(3)
-                date_t = c1.date_input("Date", datetime.now())
+                date_t = c1.date_input("Date de la transaction", datetime.now())
                 type_t = c2.selectbox("Motif", LISTE_MOTIFS)
-                ticker_t = c3.text_input("Ticker (ou 'Cash')")
+                ticker_t = c3.text_input("Ticker (ou 'CASH')")
+                
                 c4, c5, c6 = st.columns(3)
                 qte_t = c4.text_input("Quantité", value="0")
                 prix_t = c5.text_input("Prix Unitaire (€)", value="0")
-                frais_t = c6.text_input("Frais (€)", value="0")
-                compte_t = st.selectbox("Compte", LISTE_COMPTES)
-                if st.form_submit_button("Enregistrer"):
+                frais_t = c6.text_input("Frais de transaction (€)", value="0")
+                
+                compte_t = st.selectbox("Compte impacté", LISTE_COMPTES)
+                
+                if st.form_submit_button("Enregistrer la transaction"):
                     try:
-                        success = ajouter_transaction(date_t.strftime("%d/%m/%Y"), type_t, ticker_t.strip().upper(), 
-                                                   float(qte_t.replace(',', '.')), float(prix_t.replace(',', '.')), 
-                                                   float(frais_t.replace(',', '.')), compte_t)
-                        if success: st.success("✅ Enregistré !"); st.rerun()
-                    except: st.error("Données invalides.")
+                        date_formattee = date_t.strftime("%d/%m/%Y")
+                        success = ajouter_transaction(
+                            date_formattee, 
+                            type_t, 
+                            ticker_t.strip().upper(), 
+                            float(qte_t.replace(',', '.')), 
+                            float(prix_t.replace(',', '.')), 
+                            float(frais_t.replace(',', '.')), 
+                            compte_t
+                        )
+                        if success: 
+                            st.success("✅ Transaction enregistrée avec succès !")
+                            st.rerun()
+                    except ValueError: 
+                        st.error("⚠️ Erreur : Que des chiffres pour Quantité, Prix et Frais.")
     else:
-        st.warning("🔒 Saisissez le mot de passe dans le menu pour ajouter des transactions.")
+        st.warning("🔒 Saisissez le mot de passe dans le menu de gauche pour ajouter des transactions.")
 
     df_trans = charger_transactions()
+    
     if not df_trans.empty:
         st.subheader("Gérer l'historique")
+        st.info("💡 Tu peux modifier ou supprimer une ligne (corbeille) directement dans le tableau ci-dessous.")
+        
         if est_autorise:
             df_trans_mod = st.data_editor(df_trans, num_rows="dynamic", use_container_width=True, key="trans_editor")
             if not df_trans.equals(df_trans_mod):
-                sauvegarder_transactions(df_trans_mod); st.rerun()
+                sauvegarder_transactions(df_trans_mod)
+                st.rerun()
         else:
             st.dataframe(df_trans, use_container_width=True)
     else:
-        st.info("Aucune transaction trouvée.")
+        st.info("Aucune transaction n'a été trouvée dans Google Sheets.")
+
 
 # ==========================================
 # PAGE 3 : BILAN ET PERFORMANCE (COMPTA)
 # ==========================================
 elif page == "📈 Bilan & Performance (Compta)":
-    st.title("📈 Bilan & Performance")
+    st.title("📈 Bilan & Performance (Comptabilité globale)")
+    
     df_trans = charger_transactions()
+    
     if df_trans.empty:
-        st.info("Historique vide.")
+        st.info("Aucune transaction trouvée pour générer le bilan. Remplis d'abord ton Historique.")
     else:
+        # Nettoyage des colonnes pour les calculs mathématiques
         for col in ["Quantité", "Prix", "Frais"]:
             df_trans[col] = pd.to_numeric(df_trans[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
             
+        # ---------------------------
+        # SYNTHÈSE DES FLUX (CASH)
+        # ---------------------------
         df_cash = df_trans[df_trans["Ticker"].str.upper() == "CASH"]
+        
         depots = df_cash[df_cash["Type"] == "DÉPÔT"]["Prix"].sum()
         retraits = df_cash[df_cash["Type"].isin(["RETRAIT", "PAIEMENT"])]["Prix"].sum()
         net_injecte = depots - retraits
+        total_frais = df_trans["Frais"].sum()
         
         st.header("🏦 Synthèse des Flux")
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Dépôts", f"{depots:.2f} €")
-        c2.metric("Total Retraits", f"- {retraits:.2f} €")
+        c2.metric("Total Retraits / Paiements", f"- {retraits:.2f} €")
         c3.metric("Capital Net Injecté", f"{net_injecte:.2f} €")
+        c4.metric("Frais Totaux Payés", f"{total_frais:.2f} €")
         
         st.divider()
-        st.header("📊 Rentabilité par Actif")
+        
+        # ---------------------------
+        # RENTABILITÉ PAR ACTIF
+        # ---------------------------
+        st.header("📊 Rentabilité par Actif (Réalisé + Latent)")
+        
+        # On exclut le CASH pour analyser uniquement les actifs boursiers
         df_assets = df_trans[df_trans["Ticker"].str.upper() != "CASH"]
+        
         if not df_assets.empty:
             recap = []
             tickers = df_assets["Ticker"].unique()
-            with st.spinner("Calcul en cours..."):
-                try: taux = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
-                except: taux = 0.92
+            
+            with st.spinner("Calcul des gains et récupération des prix en direct..."):
+                try: 
+                    taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
+                except: 
+                    taux_usd_eur = 0.92
+                
                 for t in tickers:
                     dft = df_assets[df_assets["Ticker"] == t]
-                    ach, ven, div = dft[dft["Type"] == "ACHAT"], dft[dft["Type"] == "VENTE"], dft[dft["Type"] == "DIVIDENDE"]
-                    v_ach, v_ven = (ach["Quantité"] * ach["Prix"]).sum(), (ven["Quantité"] * ven["Prix"]).sum()
-                    v_div = div.apply(lambda r: (r["Quantité"] * r["Prix"]) if r["Quantité"] > 1 else r["Prix"], axis=1).sum()
-                    solde = ach["Quantité"].sum() - ven["Quantité"].sum()
-                    px_act = 0
-                    if solde > 0.0001:
+                    
+                    achats = dft[dft["Type"] == "ACHAT"]
+                    ventes = dft[dft["Type"] == "VENTE"]
+                    divs = dft[dft["Type"] == "DIVIDENDE"]
+                    
+                    vol_achat = (achats["Quantité"] * achats["Prix"]).sum()
+                    vol_vente = (ventes["Quantité"] * ventes["Prix"]).sum()
+                    
+                    # Logique de sécurité pour le montant des dividendes (parfois par action, parfois total)
+                    vol_div = divs.apply(lambda r: (r["Quantité"] * r["Prix"]) if r["Quantité"] > 1 else r["Prix"], axis=1).sum()
+                    
+                    frais_actif = dft["Frais"].sum()
+                    solde_qte = achats["Quantité"].sum() - ventes["Quantité"].sum()
+                    
+                    # Prix actuel pour évaluer le gain "Latent"
+                    prix_actuel = 0
+                    if solde_qte > 0.0001:  # Si on possède encore l'action
                         try:
-                            s_yf = yf.Ticker(str(t).strip().upper())
-                            px_l = s_yf.history(period="1d")['Close'].iloc[-1]
-                            coef = taux if s_yf.fast_info.get("currency", "EUR") == "USD" else 1
-                            px_act = px_l * coef
-                        except: px_act = 0
-                    val_act = solde * px_act
-                    pnl = (val_act + v_ven + v_div) - (v_ach + dft["Frais"].sum())
-                    recap.append({"Ticker": t, "Actions": solde, "Acheté": v_ach, "Vendu": v_ven, "Dividendes": v_div, "Valeur": val_act, "P&L": pnl})
+                            data = yf.Ticker(str(t).strip().upper())
+                            p_local = data.history(period="1d")['Close'].iloc[-1]
+                            dev = data.fast_info.get("currency", "EUR")
+                            coef = taux_usd_eur if dev == "USD" else 1
+                            prix_actuel = p_local * coef
+                        except:
+                            prix_actuel = 0
+                            
+                    valeur_actuelle = solde_qte * prix_actuel
+                    
+                    # Le gain ultime : (Ce qui reste + Ce qui a été vendu + Dividendes) - (Ce qui a été acheté + Frais)
+                    pnl = (valeur_actuelle + vol_vente + vol_div) - (vol_achat + frais_actif)
+                    pnl_pct = (pnl / vol_achat * 100) if vol_achat > 0 else 0
+                    
+                    recap.append({
+                        "Ticker": t,
+                        "Solde Actions": solde_qte,
+                        "Acheté (€)": vol_achat,
+                        "Vendu (€)": vol_vente,
+                        "Dividendes (€)": vol_div,
+                        "Frais (€)": frais_actif,
+                        "Valeur Actuelle (€)": valeur_actuelle,
+                        "Gain / Perte Total (€)": pnl,
+                        "Rentabilité (%)": pnl_pct
+                    })
+            
             df_recap = pd.DataFrame(recap)
-            st.dataframe(df_recap.style.format({"Actions": "{:.4f}", "Acheté": "{:.2f} €", "Vendu": "{:.2f} €", "Dividendes": "{:.2f} €", "Valeur": "{:.2f} €", "P&L": "{:.2f} €"}).map(style_plus_value, subset=['P&L']), use_container_width=True)
+            
+            # RÉSULTAT GLOBAL COMPTABLE
+            st.subheader("🏆 Résultat Global des Investissements")
+            tot_pnl = df_recap["Gain / Perte Total (€)"].sum()
+            tot_achete = df_recap["Acheté (€)"].sum()
+            tot_pnl_pct = (tot_pnl / tot_achete * 100) if tot_achete > 0 else 0
+            
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Gains/Pertes Nets (Toutes positions)", f"{tot_pnl:.2f} €")
+            m2.metric("Rentabilité Globale Nette", f"{tot_pnl_pct:.2f} %")
+            m3.metric("Total Dividendes Encaissés", f"{df_recap['Dividendes (€)'].sum():.2f} €")
+            
+            st.divider()
+            
+            # TABLEAU DÉTAILLÉ
+            st.dataframe(df_recap.style.format({
+                "Solde Actions": "{:.4f}",
+                "Acheté (€)": "{:.2f} €",
+                "Vendu (€)": "{:.2f} €",
+                "Dividendes (€)": "{:.2f} €",
+                "Frais (€)": "{:.2f} €",
+                "Valeur Actuelle (€)": "{:.2f} €",
+                "Gain / Perte Total (€)": "{:.2f} €",
+                "Rentabilité (%)": "{:.2f} %"
+            }).map(style_plus_value, subset=['Gain / Perte Total (€)', 'Rentabilité (%)']), use_container_width=True)
