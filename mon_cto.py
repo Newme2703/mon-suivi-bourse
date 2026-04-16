@@ -13,7 +13,7 @@ st.set_page_config(layout="wide")
 ID_SHEET = "14sSa2p27u2oY9EsJxaNP6CFX4HUznYJojnPprI6vDBY"
 FICHIER_HISTORIQUE = "historique_patrimoine.csv"
 
-st.title("🌍 Mon Patrimoine Global (Sync Directe Sheets)")
+st.title("🌍 Mon Patrimoine Global (Objectifs & Potentiel)")
 
 # --- 1. FONCTIONS DE CONNEXION ET SAUVEGARDE ---
 @st.cache_resource
@@ -26,8 +26,12 @@ def connecter_google_sheets():
 def charger_donnees():
     try:
         sheet = connecter_google_sheets()
-        # 🛠️ On garde bien la valeur brute pour éviter le bug des virgules
         data = sheet.get_all_records(value_render_option='UNFORMATTED_VALUE')
+        
+        if not data:
+            st.warning("⚠️ Le Google Sheet est connecté mais semble vide.")
+            return []
+            
         df_sheet = pd.DataFrame(data)
         
         for col in ["Quantité", "PRU"]:
@@ -35,8 +39,15 @@ def charger_donnees():
                 df_sheet[col] = pd.to_numeric(df_sheet[col].astype(str).str.replace(',', '.'), errors='coerce')
         
         return df_sheet.dropna(subset=["Ticker"]).to_dict('records')
+        
     except Exception as e:
-        st.error(f"Erreur de lecture Google Sheets : {e}")
+        erreur_str = str(e).lower()
+        if "permission" in erreur_str or "403" in erreur_str:
+            st.error("❌ Erreur 403 : As-tu partagé le Sheets avec l'email du bot en tant qu'Éditeur ?")
+        elif "404" in erreur_str:
+            st.error("❌ Erreur 404 : Fichier introuvable. L'ID de ton Google Sheet est-il correct ?")
+        else:
+            st.error(f"❌ Erreur de lecture : {e}")
         return []
 
 def sauvegarder_donnees(portefeuille):
@@ -62,12 +73,10 @@ def enregistrer_snapshot(valeur_totale):
     df_hist = df_hist.sort_values(by="Date")
     df_hist.to_csv(FICHIER_HISTORIQUE, index=False)
 
-# --- FONCTION DE COULEUR ---
 def style_plus_value(val):
-    if val > 0:
-        return 'color: #28a745; font-weight: bold' # Vert
-    elif val < 0:
-        return 'color: #dc3545; font-weight: bold' # Rouge
+    if pd.isna(val): return ''
+    if val > 0: return 'color: #28a745; font-weight: bold' # Vert
+    elif val < 0: return 'color: #dc3545; font-weight: bold' # Rouge
     return 'color: #6c757d' # Gris
 
 # --- 2. SÉCURITÉ : VÉRIFICATION DU MOT DE PASSE ---
@@ -78,14 +87,13 @@ try:
     est_autorise = (mot_de_passe_saisi == st.secrets["APP_PASSWORD"])
 except:
     est_autorise = False
-    st.sidebar.error("⚠️ Clé 'APP_PASSWORD' manquante dans les Secrets Streamlit.")
+    st.sidebar.error("⚠️ Clé 'APP_PASSWORD' manquante dans les Secrets.")
 
 if est_autorise:
     st.sidebar.success("Mode Édition Activé")
 else:
-    if mot_de_passe_saisi:
-        st.sidebar.error("Mot de passe incorrect")
-    st.sidebar.info("Mode consultation actif. Mot de passe requis pour modifier.")
+    if mot_de_passe_saisi: st.sidebar.error("Mot de passe incorrect")
+    st.sidebar.info("Mode consultation actif.")
 
 # --- 3. INITIALISATION ---
 if 'portefeuille' not in st.session_state:
@@ -108,23 +116,20 @@ if est_autorise:
 
         if bouton_ajout and nouveau_ticker:
             try:
-                qte_finale = float(nouvelle_quantite_str.replace(',', '.'))
-                pru_final = float(nouveau_pru_str.replace(',', '.'))
-                
                 nouvelle_action = {
                     "Compte": type_compte,
                     "Ticker": nouveau_ticker.upper().strip(),
-                    "Quantité": qte_finale,
-                    "PRU": pru_final
+                    "Quantité": float(nouvelle_quantite_str.replace(',', '.')),
+                    "PRU": float(nouveau_pru_str.replace(',', '.'))
                 }
                 st.session_state.portefeuille.append(nouvelle_action)
                 sauvegarder_donnees(st.session_state.portefeuille)
-                st.success(f"{nouveau_ticker} ajouté dans {type_compte} !")
+                st.success(f"{nouveau_ticker} ajouté !")
                 st.rerun()
             except ValueError:
-                st.error("⚠️ Erreur : Veille à bien taper uniquement des chiffres.")
+                st.error("⚠️ Erreur : Que des chiffres !")
 else:
-    st.sidebar.warning("🔒 Formulaire d'ajout verrouillé")
+    st.sidebar.warning("🔒 Saisie verrouillée")
 
 # --- 5. GESTION DES LIGNES (Protégé) ---
 if est_autorise:
@@ -147,51 +152,61 @@ if not st.session_state.portefeuille:
 else:
     df = pd.DataFrame(st.session_state.portefeuille)
     
-    with st.spinner('Récupération des données...'):
-        try:
-            taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
-        except:
-            taux_usd_eur = 0.92
+    with st.spinner("Récupération des données et analyse du potentiel..."):
+        try: taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
+        except: taux_usd_eur = 0.92
             
-        cours_actuels_eur = []
-        devises_origine = []
-        dividendes_par_action = []
+        cours_actuels_eur, devises_origine, dividendes_par_action = [], [], []
+        objectifs_cours_eur = [] # Nouvelle liste pour le potentiel
         
         for ticker in df["Ticker"]:
             t = str(ticker).strip().upper()
             try:
                 data = yf.Ticker(t)
+                # 1. Prix actuel
                 prix_local = data.history(period="1d")['Close'].iloc[-1]
                 devise = data.fast_info.get("currency", "EUR")
                 
+                # 2. Dividende
                 div_local = 0
-                try:
-                    div_local = data.info.get('dividendRate', 0) or 0
-                except:
-                    div_local = 0
+                try: div_local = data.info.get('dividendRate', 0) or 0
+                except: div_local = 0
+                
+                # 3. Objectif de cours (Potentiel Analystes)
+                obj_local = 0
+                try: obj_local = data.info.get('targetMeanPrice', 0) or 0
+                except: obj_local = 0
                 
                 if devise == "USD":
                     prix_eur = prix_local * taux_usd_eur
                     div_eur = div_local * taux_usd_eur
+                    obj_eur = obj_local * taux_usd_eur
                 else:
                     prix_eur = prix_local
                     div_eur = div_local
+                    obj_eur = obj_local
                     
                 cours_actuels_eur.append(prix_eur)
                 devises_origine.append(devise)
                 dividendes_par_action.append(div_eur)
+                objectifs_cours_eur.append(obj_eur)
             except:
-                cours_actuels_eur.append(0); devises_origine.append("Erreur"); dividendes_par_action.append(0)
+                cours_actuels_eur.append(0); devises_origine.append("Erreur")
+                dividendes_par_action.append(0); objectifs_cours_eur.append(0)
 
-    # Calculs
+    # Calculs classiques
     df["Devise"] = devises_origine
     df["Cours Actuel (€)"] = cours_actuels_eur
     df["Valeur Investie (€)"] = df["Quantité"] * df["PRU"]
     df["Valeur Actuelle (€)"] = df["Quantité"] * df["Cours Actuel (€)"]
     df["Plus-Value (€)"] = df["Valeur Actuelle (€)"] - df["Valeur Investie (€)"]
     df["Plus-Value (%)"] = (df["Plus-Value (€)"] / df["Valeur Investie (€)"]) * 100
-    df["Dividende / Action (€)"] = dividendes_par_action
-    df["Rente Annuelle (€)"] = df["Quantité"] * df["Dividende / Action (€)"]
+    df["Rente Annuelle (€)"] = df["Quantité"] * dividendes_par_action
+    
+    # NOUVEAUX CALCULS : Potentiel
+    df["Objectif (€)"] = objectifs_cours_eur
+    # On calcule le potentiel uniquement si l'objectif est supérieur à 0 (pour éviter les ETF)
+    df["Potentiel (%)"] = df.apply(lambda row: ((row["Objectif (€)"] - row["Cours Actuel (€)"]) / row["Cours Actuel (€)"] * 100) if row["Objectif (€)"] > 0 and row["Cours Actuel (€)"] > 0 else 0, axis=1)
 
     # --- 7. RÉSUMÉS ---
     st.header("📊 Vue Détaillée")
@@ -205,29 +220,23 @@ else:
     c2.metric("Total Investi", f"{total_investi:.2f} €")
     c3.metric("Performance Globale", f"{total_pv:.2f} €", f"{total_pv_pct:.2f} %")
     
-    st.subheader("💸 Ma Machine à Cash")
-    total_div_an = df["Rente Annuelle (€)"].sum()
-    rendement_moyen = (total_div_an / total_investi * 100) if total_investi > 0 else 0
-    
-    c4, c5, c6 = st.columns(3)
-    c4.metric("Rente Annuelle", f"{total_div_an:.2f} € / an")
-    c5.metric("Soit par mois", f"{(total_div_an / 12):.2f} € / mois")
-    c6.metric("Rendement (Yield on Cost)", f"{rendement_moyen:.2f} %")
-    
     st.divider()
 
     # --- 8. TABLEAU AVEC COULEURS ---
-    colonnes_a_afficher = ["Compte", "Ticker", "Devise", "Quantité", "PRU", "Cours Actuel (€)", "Valeur Actuelle (€)", "Plus-Value (%)", "Dividende / Action (€)", "Rente Annuelle (€)"]
+    # On ajoute Objectif et Potentiel à l'affichage !
+    colonnes_a_afficher = ["Compte", "Ticker", "Quantité", "PRU", "Cours Actuel (€)", "Objectif (€)", "Potentiel (%)", "Valeur Actuelle (€)", "Plus-Value (%)", "Rente Annuelle (€)"]
     df_final = df[colonnes_a_afficher].sort_values(by="Compte")
     df_final = df_final.fillna(0) 
 
+    # On utilise la même fonction de couleur (style_plus_value) pour la PV et le Potentiel
     st.dataframe(df_final.style.format({
         "Quantité": "{:.4f}", "PRU": "{:.2f} €", "Cours Actuel (€)": "{:.2f} €",
+        "Objectif (€)": "{:.2f} €", "Potentiel (%)": "{:.2f} %",
         "Valeur Actuelle (€)": "{:.2f} €", "Plus-Value (%)": "{:.2f} %",
-        "Dividende / Action (€)": "{:.2f} €", "Rente Annuelle (€)": "{:.2f} €"
-    }).map(style_plus_value, subset=['Plus-Value (%)']), use_container_width=True)
+        "Rente Annuelle (€)": "{:.2f} €"
+    }).map(style_plus_value, subset=['Plus-Value (%)', 'Potentiel (%)']), use_container_width=True)
 
-    # --- 9. LES GRAPHIQUES (SUNBURST + LIGNE DE TEMPS) ---
+    # --- 9. LES GRAPHIQUES ---
     st.divider()
     col_gauche, col_droite = st.columns(2)
     with col_gauche:
@@ -238,13 +247,12 @@ else:
     with col_droite:
         st.subheader("📈 Évolution")
         
-        # Le bouton d'enregistrement n'est cliquable que si on est autorisé
         if est_autorise:
             if st.button("📸 Enregistrer la valeur d'aujourd'hui"):
                 enregistrer_snapshot(total_actuel)
                 st.success("Enregistré !")
         else:
-            st.info("🔒 Saisissez le mot de passe pour enregistrer un point d'historique.")
+            st.info("🔒 Connecte-toi avec le mot de passe pour enregistrer un point d'historique.")
             
         df_hist = charger_historique()
         if not df_hist.empty:
