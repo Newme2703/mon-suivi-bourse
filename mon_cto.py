@@ -7,35 +7,37 @@ from datetime import datetime
 
 st.set_page_config(layout="wide")
 
-# 🔗 REMPLACE CE LIEN PAR TON LIEN "PUBLIER SUR LE WEB (CSV)"
+# 🔗 COLLE TON LIEN "PUBLIER SUR LE WEB (CSV)" ICI
 URL_GOOGLE_SHEETS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTVsBPRwm4RlBiWyRJlw1GTKnYRyFweDEv1rkbgcF2E-tXJhMxa5i2qaYmX6wqZ-q2k8ldYKpdQ3oPG/pub?gid=0&single=true&output=csv"
 
+NOM_FICHIER = "mon_portefeuille.csv"
 FICHIER_HISTORIQUE = "historique_patrimoine.csv"
 
-st.title("🌍 Mon Patrimoine Global (CTO, PEA, Crypto)")
+st.title("🌍 Mon Patrimoine Global (Sync Google Sheets)")
 
 # --- 1. FONCTIONS DE SAUVEGARDE ---
 def charger_donnees():
+    # On tente d'abord de lire Google Sheets
     try:
-        # On ajoute un "cachebuster" pour forcer la mise à jour des données Google Sheets
         url = f"{URL_GOOGLE_SHEETS}&cachebuster={datetime.now().timestamp()}"
         df_sheet = pd.read_csv(url)
         
-        # SÉCURITÉ : On force la conversion des chiffres pour éviter l'erreur de texte
+        # Sécurité : On s'assure que les chiffres sont bien des chiffres
         for col in ["Quantité", "PRU"]:
             if col in df_sheet.columns:
                 df_sheet[col] = pd.to_numeric(df_sheet[col].astype(str).str.replace(',', '.'), errors='coerce')
         
-        return df_sheet.dropna(subset=["Ticker"]).to_dict('records')
+        # On ignore les lignes vides
+        return df_sheet.dropna(subset=["Ticker", "Quantité", "PRU"]).to_dict('records')
     except:
-        # Si le lien n'est pas encore mis, on cherche le fichier local par défaut
-        if os.path.exists("mon_portefeuille.csv"):
-            return pd.read_csv("mon_portefeuille.csv").to_dict('records')
+        # Si Google Sheets échoue ou n'est pas configuré, on prend le fichier local
+        if os.path.exists(NOM_FICHIER):
+            return pd.read_csv(NOM_FICHIER).to_dict('records')
         return []
 
 def sauvegarder_donnees(portefeuille):
     df = pd.DataFrame(portefeuille)
-    df.to_csv("mon_portefeuille.csv", index=False)
+    df.to_csv(NOM_FICHIER, index=False)
 
 def charger_historique():
     if os.path.exists(FICHIER_HISTORIQUE):
@@ -119,7 +121,6 @@ else:
                 data = yf.Ticker(str(ticker).strip())
                 prix_local = data.history(period="1d")['Close'].iloc[-1]
                 devise = data.fast_info.get("currency", "EUR")
-                devises_origine.append(devise)
                 info = data.info
                 div_local = info.get('dividendRate', 0)
                 if div_local is None: div_local = 0
@@ -132,11 +133,12 @@ else:
                     div_eur = div_local
                     
                 cours_actuels_eur.append(prix_eur)
+                devises_origine.append(devise)
                 dividendes_par_action.append(div_eur)
             except:
                 cours_actuels_eur.append(0); devises_origine.append("Erreur"); dividendes_par_action.append(0)
 
-    # Calculs
+    # Calculs (Assure-toi que les listes ont la même taille que le DF)
     df["Devise"] = devises_origine
     df["Cours Actuel (€)"] = cours_actuels_eur
     df["Valeur Investie (€)"] = df["Quantité"] * df["PRU"]
