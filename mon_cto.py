@@ -27,15 +27,31 @@ def charger_donnees():
     try:
         sheet = connecter_google_sheets()
         data = sheet.get_all_records()
+        
+        if not data:
+            st.warning("⚠️ Le Google Sheet est connecté mais semble vide (aucune donnée sous les titres).")
+            return []
+            
         df_sheet = pd.DataFrame(data)
         
+        # Vérification des colonnes indispensables
+        colonnes_requises = ["Compte", "Ticker", "Quantité", "PRU"]
+        for col in colonnes_requises:
+            if col not in df_sheet.columns:
+                st.error(f"❌ Erreur : La colonne '{col}' est introuvable. Vérifie la ligne 1 de ton Sheets.")
+                return []
+        
+        # Conversion sécurisée
         for col in ["Quantité", "PRU"]:
-            if col in df_sheet.columns:
-                df_sheet[col] = pd.to_numeric(df_sheet[col].astype(str).str.replace(',', '.'), errors='coerce')
+            df_sheet[col] = pd.to_numeric(df_sheet[col].astype(str).str.replace(',', '.'), errors='coerce')
         
         return df_sheet.dropna(subset=["Ticker"]).to_dict('records')
+        
+    except gspread.exceptions.PermissionError:
+        st.error("❌ Erreur de permission : As-tu partagé le Sheets avec l'email du bot ?")
+        return []
     except Exception as e:
-        st.error(f"Erreur de lecture Google Sheets : {e}")
+        st.error(f"❌ Erreur inconnue : {e}")
         return []
 
 def sauvegarder_donnees(portefeuille):
