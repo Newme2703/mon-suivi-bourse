@@ -5,29 +5,37 @@ import os
 import plotly.express as px
 from datetime import datetime
 
-# --- CONFIGURATION DE LA PAGE ---
-st.set_page_config(layout="wide", page_title="Mon Patrimoine Live")
+st.set_page_config(layout="wide")
 
-# 🔗 COLLE TON LIEN "PUBLIER SUR LE WEB (CSV)" ICI
+# 🔗 REMPLACE CE LIEN PAR TON LIEN "PUBLIER SUR LE WEB (CSV)"
 URL_GOOGLE_SHEETS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTVsBPRwm4RlBiWyRJlw1GTKnYRyFweDEv1rkbgcF2E-tXJhMxa5i2qaYmX6wqZ-q2k8ldYKpdQ3oPG/pub?gid=0&single=true&output=csv"
 
 FICHIER_HISTORIQUE = "historique_patrimoine.csv"
 
-st.title("🌍 Mon Patrimoine Global (Sync Google Sheets)")
+st.title("🌍 Mon Patrimoine Global (CTO, PEA, Crypto)")
 
-# --- 1. FONCTIONS DE RÉCUPÉRATION & SAUVEGARDE ---
-
+# --- 1. FONCTIONS DE SAUVEGARDE ---
 def charger_donnees():
-    """Charge les données depuis le Google Sheets publié en CSV."""
     try:
-        # On ajoute un paramètre de temps pour éviter que Google ne serve une version cachée (cache)
+        # On ajoute un "cachebuster" pour forcer la mise à jour des données Google Sheets
         url = f"{URL_GOOGLE_SHEETS}&cachebuster={datetime.now().timestamp()}"
         df_sheet = pd.read_csv(url)
-        return df_sheet.to_dict('records')
-    except Exception as e:
-        st.error(f"Erreur de connexion au Google Sheets : {e}")
-        st.info("Vérifiez que vous avez bien choisi 'Valeurs séparées par des virgules (.csv)' dans 'Publier sur le web'.")
+        
+        # SÉCURITÉ : On force la conversion des chiffres pour éviter l'erreur de texte
+        for col in ["Quantité", "PRU"]:
+            if col in df_sheet.columns:
+                df_sheet[col] = pd.to_numeric(df_sheet[col].astype(str).str.replace(',', '.'), errors='coerce')
+        
+        return df_sheet.dropna(subset=["Ticker"]).to_dict('records')
+    except:
+        # Si le lien n'est pas encore mis, on cherche le fichier local par défaut
+        if os.path.exists("mon_portefeuille.csv"):
+            return pd.read_csv("mon_portefeuille.csv").to_dict('records')
         return []
+
+def sauvegarder_donnees(portefeuille):
+    df = pd.DataFrame(portefeuille)
+    df.to_csv("mon_portefeuille.csv", index=False)
 
 def charger_historique():
     if os.path.exists(FICHIER_HISTORIQUE):
@@ -43,38 +51,78 @@ def enregistrer_snapshot(valeur_totale):
     df_hist = df_hist.sort_values(by="Date")
     df_hist.to_csv(FICHIER_HISTORIQUE, index=False)
 
+# --- FONCTION DE COULEUR ---
 def style_plus_value(val):
-    if val > 0: return 'color: #28a745; font-weight: bold'
-    elif val < 0: return 'color: #dc3545; font-weight: bold'
-    return 'color: #6c757d'
+    if val > 0:
+        return 'color: #28a745; font-weight: bold' # Vert
+    elif val < 0:
+        return 'color: #dc3545; font-weight: bold' # Rouge
+    return 'color: #6c757d' # Gris
 
-# --- 2. TRAITEMENT DES DONNÉES ---
+# --- 2. INITIALISATION ---
+if 'portefeuille' not in st.session_state:
+    st.session_state.portefeuille = charger_donnees()
 
-data_portefeuille = charger_donnees()
+# --- 3. FORMULAIRE D'AJOUT RAPIDE ---
+st.sidebar.header("➕ Ajouter une ligne")
+with st.sidebar.form("ajout_ligne", clear_on_submit=True):
+    type_compte = st.selectbox("Choix du Compte", ["CTO", "PEA", "Crypto", "Autre"])
+    nouveau_ticker = st.text_input("Symbole (ex: AI.PA, BTC-EUR)")
+    nouvelle_quantite = st.number_input("Quantité", min_value=0.00000, step=0.01, format="%f")
+    nouveau_pru = st.number_input("PRU (€)", min_value=0.01, step=0.01)
+    bouton_ajout = st.form_submit_button("Ajouter")
 
-if not data_portefeuille:
-    st.warning("⚠️ En attente de données. Assure-toi que ton lien Google Sheets est correct et que le fichier n'est pas vide.")
+    if bouton_ajout and nouveau_ticker:
+        nouvelle_action = {
+            "Compte": type_compte,
+            "Ticker": nouveau_ticker.upper().strip(),
+            "Quantité": nouvelle_quantite,
+            "PRU": nouveau_pru
+        }
+        st.session_state.portefeuille.append(nouvelle_action)
+        sauvegarder_donnees(st.session_state.portefeuille)
+        st.success(f"{nouveau_ticker} ajouté !")
+        st.rerun()
+
+# --- 4. GESTION DES LIGNES ---
+with st.expander("🛠️ Gérer mes actifs (Modifier ou Supprimer)"):
+    df_base = pd.DataFrame(st.session_state.portefeuille)
+    if df_base.empty:
+        df_base = pd.DataFrame(columns=["Compte", "Ticker", "Quantité", "PRU"])
+
+    df_modifie = st.data_editor(df_base, num_rows="dynamic", use_container_width=True, key="editeur")
+
+    if not df_base.equals(df_modifie):
+        st.session_state.portefeuille = df_modifie.to_dict('records')
+        sauvegarder_donnees(st.session_state.portefeuille)
+        st.rerun()
+
+# --- 5. AFFICHAGE ET CALCULS ---
+if not st.session_state.portefeuille:
+    st.info("Ton portefeuille est vide. Ajoute un actif pour commencer.")
+    total_actuel = 0
 else:
-    df = pd.DataFrame(data_portefeuille)
+    df = pd.DataFrame(st.session_state.portefeuille)
     
-    with st.spinner('Synchronisation avec les marchés mondiaux...'):
+    with st.spinner('Récupération des données...'):
         try:
-            # Récupération du taux de change
             taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
         except:
             taux_usd_eur = 0.92
             
-        cours_actuels_eur, divs_eur, devises = [], [], []
+        cours_actuels_eur = []
+        devises_origine = []
+        dividendes_par_action = []
         
         for ticker in df["Ticker"]:
             try:
                 data = yf.Ticker(str(ticker).strip())
-                # Prix actuel
                 prix_local = data.history(period="1d")['Close'].iloc[-1]
-                # Devise
                 devise = data.fast_info.get("currency", "EUR")
-                # Dividende
-                div_local = data.info.get('dividendRate', 0) or 0
+                devises_origine.append(devise)
+                info = data.info
+                div_local = info.get('dividendRate', 0)
+                if div_local is None: div_local = 0
                 
                 if devise == "USD":
                     prix_eur = prix_local * taux_usd_eur
@@ -84,69 +132,69 @@ else:
                     div_eur = div_local
                     
                 cours_actuels_eur.append(prix_eur)
-                divs_eur.append(div_eur)
-                devises.append(devise)
+                dividendes_par_action.append(div_eur)
             except:
-                cours_actuels_eur.append(0); divs_eur.append(0); devises.append("N/A")
+                cours_actuels_eur.append(0); devises_origine.append("Erreur"); dividendes_par_action.append(0)
 
-    # Calculs colonnes
-    df["Cours (€)"] = cours_actuels_eur
-    df["Valeur Actuelle (€)"] = df["Quantité"] * df["Cours (€)"]
+    # Calculs
+    df["Devise"] = devises_origine
+    df["Cours Actuel (€)"] = cours_actuels_eur
     df["Valeur Investie (€)"] = df["Quantité"] * df["PRU"]
+    df["Valeur Actuelle (€)"] = df["Quantité"] * df["Cours Actuel (€)"]
     df["Plus-Value (€)"] = df["Valeur Actuelle (€)"] - df["Valeur Investie (€)"]
-    df["PV (%)"] = (df["Plus-Value (€)"] / df["Valeur Investie (€)"] * 100).fillna(0)
-    df["Rente Annuelle (€)"] = df["Quantité"] * divs_eur
+    df["Plus-Value (%)"] = (df["Plus-Value (€)"] / df["Valeur Investie (€)"]) * 100
+    df["Dividende / Action (€)"] = dividendes_par_action
+    df["Rente Annuelle (€)"] = df["Quantité"] * df["Dividende / Action (€)"]
 
-    # --- 3. AFFICHAGE DES MÉTRIQUES ---
+    # --- 6. RÉSUMÉS ---
+    st.header("📊 Vue Détaillée")
     total_investi = df["Valeur Investie (€)"].sum()
     total_actuel = df["Valeur Actuelle (€)"].sum()
     total_pv = total_actuel - total_investi
-    total_div_an = df["Rente Annuelle (€)"].sum()
+    total_pv_pct = (total_pv / total_investi * 100) if total_investi > 0 else 0
 
-    st.header("📊 Tableau de Bord")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Patrimoine Total", f"{total_actuel:.2f} €")
+    c2.metric("Total Investi", f"{total_investi:.2f} €")
+    c3.metric("Performance Globale", f"{total_pv:.2f} €", f"{total_pv_pct:.2f} %")
     
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Patrimoine Total", f"{total_actuel:.2f} €")
-    m2.metric("Plus-Value Globale", f"{total_pv:.2f} €", f"{((total_actuel/total_investi-1)*100 if total_investi > 0 else 0):.2f} %")
-    m3.metric("Rente Mensuelle", f"{(total_div_an/12):.2f} € / mois")
-
     st.subheader("💸 Ma Machine à Cash")
-    c4, c5 = st.columns(2)
+    total_div_an = df["Rente Annuelle (€)"].sum()
+    rendement_moyen = (total_div_an / total_investi * 100) if total_investi > 0 else 0
+    
+    c4, c5, c6 = st.columns(3)
     c4.metric("Rente Annuelle", f"{total_div_an:.2f} € / an")
-    c5.metric("Yield on Cost Moyen", f"{((total_div_an/total_investi*100) if total_investi > 0 else 0):.2f} %")
-
+    c5.metric("Soit par mois", f"{(total_div_an / 12):.2f} € / mois")
+    c6.metric("Rendement (Yield on Cost)", f"{rendement_moyen:.2f} %")
+    
     st.divider()
 
-    # --- 4. TABLEAU FINAL ---
-    df_final = df[["Compte", "Ticker", "Quantité", "PRU", "Cours (€)", "Valeur Actuelle (€)", "PV (%)", "Rente Annuelle (€)"]].sort_values("Compte")
-    df_final = df_final.fillna(0)
+    # --- 7. TABLEAU AVEC COULEURS ---
+    colonnes_a_afficher = ["Compte", "Ticker", "Devise", "Quantité", "PRU", "Cours Actuel (€)", "Valeur Actuelle (€)", "Plus-Value (%)", "Dividende / Action (€)", "Rente Annuelle (€)"]
+    df_final = df[colonnes_a_afficher].sort_values(by="Compte")
+    df_final = df_final.fillna(0) 
 
-    st.dataframe(
-        df_final.style.format({
-            "Quantité": "{:.4f}", "PRU": "{:.2f} €", "Cours (€)": "{:.2f} €",
-            "Valeur Actuelle (€)": "{:.2f} €", "PV (%)": "{:.2f} %", "Rente Annuelle (€)": "{:.2f} €"
-        }).map(style_plus_value, subset=['PV (%)']),
-        use_container_width=True
-    )
+    st.dataframe(df_final.style.format({
+        "Quantité": "{:.4f}", "PRU": "{:.2f} €", "Cours Actuel (€)": "{:.2f} €",
+        "Valeur Actuelle (€)": "{:.2f} €", "Plus-Value (%)": "{:.2f} %",
+        "Dividende / Action (€)": "{:.2f} €", "Rente Annuelle (€)": "{:.2f} €"
+    }).map(style_plus_value, subset=['Plus-Value (%)']), use_container_width=True)
 
-    # --- 5. GRAPHIQUES ---
+    # --- 8. GRAPHIQUES ---
     st.divider()
-    g1, g2 = st.columns(2)
-    with g1:
+    col_gauche, col_droite = st.columns(2)
+    with col_gauche:
         st.subheader("☀️ Répartition")
         fig_sun = px.sunburst(df_final, path=['Compte', 'Ticker'], values='Valeur Actuelle (€)')
         fig_sun.update_traces(textinfo='label+percent entry')
         st.plotly_chart(fig_sun, use_container_width=True)
-    with g2:
-        st.subheader("📈 Historique")
-        if st.button("📸 Sauvegarder la valeur du jour"):
+    with col_droite:
+        st.subheader("📈 Évolution")
+        if st.button("📸 Enregistrer la valeur d'aujourd'hui"):
             enregistrer_snapshot(total_actuel)
-            st.success("Valeur du jour enregistrée dans l'historique local !")
-        
-        hist = charger_historique()
-        if not hist.empty:
-            fig_line = px.line(hist, x="Date", y="Patrimoine Total (€)", markers=True)
-            fig_line.update_traces(fill='tozeroy', line_color='#00b4d8')
+            st.success("Enregistré !")
+        df_hist = charger_historique()
+        if not df_hist.empty:
+            fig_line = px.line(df_hist, x="Date", y="Patrimoine Total (€)", markers=True)
+            fig_line.update_traces(fill='tozeroy', line_color='#00b4d8') 
             st.plotly_chart(fig_line, use_container_width=True)
-
-    st.info("💡 Pour modifier tes positions, fais-le directement dans ton fichier Google Sheets. Le site se mettra à jour au prochain chargement.")
