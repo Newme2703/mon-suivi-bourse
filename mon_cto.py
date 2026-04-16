@@ -208,11 +208,15 @@ if page == "📊 Portefeuille Global":
             except: 
                 taux_usd_eur = 0.92
                 
-            cours_actuels, devises, dividendes, objectifs = [], [], [], []
+            cours_actuels, devises, dividendes, objectifs, noms = [], [], [], [], []
             
             for ticker in df["Ticker"]:
                 try:
-                    data = yf.Ticker(str(ticker).strip().upper())
+                    t_str = str(ticker).strip().upper()
+                    data = yf.Ticker(t_str)
+                    
+                    # Récupération automatique du Nom de l'entreprise
+                    nom_entreprise = data.info.get('shortName', t_str)
                     prix_local = data.history(period="1d")['Close'].iloc[-1]
                     devise = data.fast_info.get("currency", "EUR")
                     div_local = data.info.get('dividendRate', 0) or 0
@@ -220,17 +224,20 @@ if page == "📊 Portefeuille Global":
                     
                     coef = taux_usd_eur if devise == "USD" else 1
                         
+                    noms.append(nom_entreprise)
                     cours_actuels.append(prix_local * coef)
                     devises.append(devise)
                     dividendes.append(div_local * coef)
                     objectifs.append(obj_local * coef)
                 except:
+                    noms.append(str(ticker))
                     cours_actuels.append(0)
                     devises.append("Err")
                     dividendes.append(0)
                     objectifs.append(0)
 
         # Calculs de la vue Globale
+        df["Nom"] = noms
         df["Cours Actuel (€)"] = cours_actuels
         df["Valeur Investie (€)"] = df["Quantité"] * df["PRU"]
         df["Valeur Actuelle (€)"] = df["Quantité"] * df["Cours Actuel (€)"]
@@ -264,7 +271,8 @@ if page == "📊 Portefeuille Global":
         
         st.divider()
         
-        cols_tab = ["Compte", "Ticker", "Quantité", "PRU", "Cours Actuel (€)", "Objectif (€)", "Potentiel (%)", "Potentiel / PRU (%)", "Valeur Actuelle (€)", "Plus-Value (%)", "Rente Annuelle (€)"]
+        # J'ai rajouté "Nom" ici dans l'affichage
+        cols_tab = ["Compte", "Ticker", "Nom", "Quantité", "PRU", "Cours Actuel (€)", "Objectif (€)", "Potentiel (%)", "Potentiel / PRU (%)", "Valeur Actuelle (€)", "Plus-Value (%)", "Rente Annuelle (€)"]
         
         st.dataframe(df[cols_tab].style.format({
             "Quantité": "{:.4f}", 
@@ -404,7 +412,7 @@ elif page == "📈 Bilan & Performance (Compta)":
             recap = []
             tickers = df_assets["Ticker"].unique()
             
-            with st.spinner("Calcul des gains et récupération des prix en direct..."):
+            with st.spinner("Calcul des gains et récupération des noms et prix en direct..."):
                 try: 
                     taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
                 except: 
@@ -419,33 +427,41 @@ elif page == "📈 Bilan & Performance (Compta)":
                     
                     vol_achat = (achats["Quantité"] * achats["Prix"]).sum()
                     vol_vente = (ventes["Quantité"] * ventes["Prix"]).sum()
-                    
-                    # Logique de sécurité pour le montant des dividendes (parfois par action, parfois total)
                     vol_div = divs.apply(lambda r: (r["Quantité"] * r["Prix"]) if r["Quantité"] > 1 else r["Prix"], axis=1).sum()
-                    
                     frais_actif = dft["Frais"].sum()
                     solde_qte = achats["Quantité"].sum() - ventes["Quantité"].sum()
                     
-                    # Prix actuel pour évaluer le gain "Latent"
+                    # On définit des valeurs par défaut au cas où la connexion Yahoo échoue
                     prix_actuel = 0
+                    nom_entreprise = str(t).upper() 
+                    
                     if solde_qte > 0.0001:  # Si on possède encore l'action
                         try:
-                            data = yf.Ticker(str(t).strip().upper())
+                            t_str = str(t).strip().upper()
+                            data = yf.Ticker(t_str)
+                            nom_entreprise = data.info.get('shortName', t_str)
                             p_local = data.history(period="1d")['Close'].iloc[-1]
                             dev = data.fast_info.get("currency", "EUR")
                             coef = taux_usd_eur if dev == "USD" else 1
                             prix_actuel = p_local * coef
                         except:
                             prix_actuel = 0
+                    else:
+                        # Même si on ne la possède plus (solde = 0), on essaie de récupérer son Vrai Nom
+                        try:
+                            t_str = str(t).strip().upper()
+                            data = yf.Ticker(t_str)
+                            nom_entreprise = data.info.get('shortName', t_str)
+                        except:
+                            pass
                             
                     valeur_actuelle = solde_qte * prix_actuel
-                    
-                    # Le gain ultime : (Ce qui reste + Ce qui a été vendu + Dividendes) - (Ce qui a été acheté + Frais)
                     pnl = (valeur_actuelle + vol_vente + vol_div) - (vol_achat + frais_actif)
                     pnl_pct = (pnl / vol_achat * 100) if vol_achat > 0 else 0
                     
                     recap.append({
                         "Ticker": t,
+                        "Nom": nom_entreprise, # LA NOUVELLE COLONNE !
                         "Solde Actions": solde_qte,
                         "Acheté (€)": vol_achat,
                         "Vendu (€)": vol_vente,
@@ -471,7 +487,7 @@ elif page == "📈 Bilan & Performance (Compta)":
             
             st.divider()
             
-            # TABLEAU DÉTAILLÉ
+            # TABLEAU DÉTAILLÉ (Avec la colonne Nom)
             st.dataframe(df_recap.style.format({
                 "Solde Actions": "{:.4f}",
                 "Acheté (€)": "{:.2f} €",
