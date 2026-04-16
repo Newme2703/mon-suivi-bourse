@@ -86,21 +86,32 @@ if st.sidebar.button("🔄 Forcer Synchro Sheets"):
 with st.sidebar.form("ajout_ligne", clear_on_submit=True):
     type_compte = st.selectbox("Choix du Compte", ["CTO", "PEA", "Crypto", "Autre"])
     nouveau_ticker = st.text_input("Symbole (ex: AI.PA, BTC-EUR)")
-    nouvelle_quantite = st.number_input("Quantité", min_value=0.00000, step=0.01, format="%f")
-    nouveau_pru = st.number_input("PRU (€)", min_value=0.01, step=0.01)
+    
+    # 🛠️ CORRECTION : On utilise text_input au lieu de number_input
+    nouvelle_quantite_str = st.text_input("Quantité (utilise , ou .)", value="0")
+    nouveau_pru_str = st.text_input("PRU (€)", value="0")
+    
     bouton_ajout = st.form_submit_button("Ajouter")
 
     if bouton_ajout and nouveau_ticker:
-        nouvelle_action = {
-            "Compte": type_compte,
-            "Ticker": nouveau_ticker.upper().strip(),
-            "Quantité": nouvelle_quantite,
-            "PRU": nouveau_pru
-        }
-        st.session_state.portefeuille.append(nouvelle_action)
-        sauvegarder_donnees(st.session_state.portefeuille)
-        st.success(f"{nouveau_ticker} ajouté dans {type_compte} !")
-        st.rerun()
+        try:
+            # On remplace les virgules par des points et on transforme le texte en chiffre
+            qte_finale = float(nouvelle_quantite_str.replace(',', '.'))
+            pru_final = float(nouveau_pru_str.replace(',', '.'))
+            
+            nouvelle_action = {
+                "Compte": type_compte,
+                "Ticker": nouveau_ticker.upper().strip(),
+                "Quantité": qte_finale,
+                "PRU": pru_final
+            }
+            st.session_state.portefeuille.append(nouvelle_action)
+            sauvegarder_donnees(st.session_state.portefeuille)
+            st.success(f"{nouveau_ticker} ajouté dans {type_compte} !")
+            st.rerun()
+        except ValueError:
+            # Sécurité au cas où on tape des lettres au lieu de chiffres
+            st.error("⚠️ Erreur : Veille à bien taper uniquement des chiffres pour la Quantité et le PRU.")
 
 # --- 4. GESTION DES LIGNES ---
 with st.expander("🛠️ Gérer mes actifs (Modifier ou Supprimer)"):
