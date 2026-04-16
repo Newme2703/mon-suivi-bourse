@@ -17,20 +17,19 @@ st.title("🌍 Mon Patrimoine Global (Sync Google Sheets)")
 
 # --- 1. FONCTIONS DE SAUVEGARDE ---
 def charger_donnees():
-    # On tente d'abord de lire Google Sheets
     try:
+        # On tente de lire le Google Sheets
         url = f"{URL_GOOGLE_SHEETS}&cachebuster={datetime.now().timestamp()}"
         df_sheet = pd.read_csv(url)
         
-        # Sécurité : On s'assure que les chiffres sont bien des chiffres
+        # Sécurité : Conversion des chiffres pour éviter les erreurs de texte
         for col in ["Quantité", "PRU"]:
             if col in df_sheet.columns:
                 df_sheet[col] = pd.to_numeric(df_sheet[col].astype(str).str.replace(',', '.'), errors='coerce')
         
-        # On ignore les lignes vides
         return df_sheet.dropna(subset=["Ticker", "Quantité", "PRU"]).to_dict('records')
     except:
-        # Si Google Sheets échoue ou n'est pas configuré, on prend le fichier local
+        # Si Google Sheets échoue, on prend le fichier local
         if os.path.exists(NOM_FICHIER):
             return pd.read_csv(NOM_FICHIER).to_dict('records')
         return []
@@ -62,6 +61,7 @@ def style_plus_value(val):
     return 'color: #6c757d' # Gris
 
 # --- 2. INITIALISATION ---
+# On recharge depuis le Cloud à chaque démarrage
 if 'portefeuille' not in st.session_state:
     st.session_state.portefeuille = charger_donnees()
 
@@ -83,7 +83,7 @@ with st.sidebar.form("ajout_ligne", clear_on_submit=True):
         }
         st.session_state.portefeuille.append(nouvelle_action)
         sauvegarder_donnees(st.session_state.portefeuille)
-        st.success(f"{nouveau_ticker} ajouté !")
+        st.success(f"{nouveau_ticker} ajouté dans {type_compte} !")
         st.rerun()
 
 # --- 4. GESTION DES LIGNES ---
@@ -117,13 +117,19 @@ else:
         dividendes_par_action = []
         
         for ticker in df["Ticker"]:
+            t = str(ticker).strip().upper()
             try:
-                data = yf.Ticker(str(ticker).strip())
+                data = yf.Ticker(t)
+                # 1. Le Prix (On utilise history qui est plus stable que .info)
                 prix_local = data.history(period="1d")['Close'].iloc[-1]
                 devise = data.fast_info.get("currency", "EUR")
-                info = data.info
-                div_local = info.get('dividendRate', 0)
-                if div_local is None: div_local = 0
+                
+                # 2. Le Dividende (Séparé pour ne pas faire planter le prix si Yahoo bloque)
+                div_local = 0
+                try:
+                    div_local = data.info.get('dividendRate', 0) or 0
+                except:
+                    div_local = 0
                 
                 if devise == "USD":
                     prix_eur = prix_local * taux_usd_eur
@@ -138,7 +144,7 @@ else:
             except:
                 cours_actuels_eur.append(0); devises_origine.append("Erreur"); dividendes_par_action.append(0)
 
-    # Calculs (Assure-toi que les listes ont la même taille que le DF)
+    # Calculs
     df["Devise"] = devises_origine
     df["Cours Actuel (€)"] = cours_actuels_eur
     df["Valeur Investie (€)"] = df["Quantité"] * df["PRU"]
@@ -182,7 +188,7 @@ else:
         "Dividende / Action (€)": "{:.2f} €", "Rente Annuelle (€)": "{:.2f} €"
     }).map(style_plus_value, subset=['Plus-Value (%)']), use_container_width=True)
 
-    # --- 8. GRAPHIQUES ---
+    # --- 8. LES GRAPHIQUES (SUNBURST + LIGNE DE TEMPS) ---
     st.divider()
     col_gauche, col_droite = st.columns(2)
     with col_gauche:
