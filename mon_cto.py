@@ -4,39 +4,51 @@ import pandas as pd
 import os
 import plotly.express as px
 from datetime import datetime
+import gspread
+from google.oauth2.service_account import Credentials
 
 st.set_page_config(layout="wide")
 
-# 🔗 COLLE TON LIEN "PUBLIER SUR LE WEB (CSV)" ICI
-URL_GOOGLE_SHEETS = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTVsBPRwm4RlBiWyRJlw1GTKnYRyFweDEv1rkbgcF2E-tXJhMxa5i2qaYmX6wqZ-q2k8ldYKpdQ3oPG/pub?gid=0&single=true&output=csv"
-
-NOM_FICHIER = "mon_portefeuille.csv"
+# 🔗 L'ID DE TON GOOGLE SHEET (Extrait de ton lien)
+ID_SHEET = "1vTVsBPRwm4RlBiWyRJlw1GTKnYRyFweDEv1rkbgcF2E-tXJhMxa5i2qaYmX6wqZ-q2k8ldYKpdQ3oPG"
 FICHIER_HISTORIQUE = "historique_patrimoine.csv"
 
-st.title("🌍 Mon Patrimoine Global (Sync Google Sheets)")
+st.title("🌍 Mon Patrimoine Global (Sync Directe Sheets)")
 
-# --- 1. FONCTIONS DE SAUVEGARDE ---
+# --- 1. FONCTIONS DE CONNEXION ET SAUVEGARDE ---
+@st.cache_resource
+def connecter_google_sheets():
+    scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+    # Utilise la clé cachée dans les Secrets Streamlit
+    creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
+    client = gspread.authorize(creds)
+    return client.open_by_key(ID_SHEET).get_worksheet(0)
+
 def charger_donnees():
     try:
-        # On tente de lire le Google Sheets
-        url = f"{URL_GOOGLE_SHEETS}&cachebuster={datetime.now().timestamp()}"
-        df_sheet = pd.read_csv(url)
+        sheet = connecter_google_sheets()
+        data = sheet.get_all_records()
+        df_sheet = pd.DataFrame(data)
         
-        # Sécurité : Conversion des chiffres pour éviter les erreurs de texte
+        # Sécurité : Conversion des chiffres
         for col in ["Quantité", "PRU"]:
             if col in df_sheet.columns:
                 df_sheet[col] = pd.to_numeric(df_sheet[col].astype(str).str.replace(',', '.'), errors='coerce')
         
-        return df_sheet.dropna(subset=["Ticker", "Quantité", "PRU"]).to_dict('records')
-    except:
-        # Si Google Sheets échoue, on prend le fichier local
-        if os.path.exists(NOM_FICHIER):
-            return pd.read_csv(NOM_FICHIER).to_dict('records')
+        return df_sheet.dropna(subset=["Ticker"]).to_dict('records')
+    except Exception as e:
+        st.error(f"Erreur de lecture Google Sheets : {e}")
         return []
 
 def sauvegarder_donnees(portefeuille):
-    df = pd.DataFrame(portefeuille)
-    df.to_csv(NOM_FICHIER, index=False)
+    try:
+        df = pd.DataFrame(portefeuille)
+        sheet = connecter_google_sheets()
+        sheet.clear()
+        # On met à jour avec les colonnes + les données en direct
+        sheet.update([df.columns.values.tolist()] + df.values.tolist())
+    except Exception as e:
+        st.error(f"Erreur de sauvegarde : {e}")
 
 def charger_historique():
     if os.path.exists(FICHIER_HISTORIQUE):
@@ -61,12 +73,16 @@ def style_plus_value(val):
     return 'color: #6c757d' # Gris
 
 # --- 2. INITIALISATION ---
-# On recharge depuis le Cloud à chaque démarrage
 if 'portefeuille' not in st.session_state:
     st.session_state.portefeuille = charger_donnees()
 
 # --- 3. FORMULAIRE D'AJOUT RAPIDE ---
 st.sidebar.header("➕ Ajouter une ligne")
+
+if st.sidebar.button("🔄 Forcer Synchro Sheets"):
+    st.session_state.portefeuille = charger_donnees()
+    st.rerun()
+
 with st.sidebar.form("ajout_ligne", clear_on_submit=True):
     type_compte = st.selectbox("Choix du Compte", ["CTO", "PEA", "Crypto", "Autre"])
     nouveau_ticker = st.text_input("Symbole (ex: AI.PA, BTC-EUR)")
@@ -94,6 +110,7 @@ with st.expander("🛠️ Gérer mes actifs (Modifier ou Supprimer)"):
 
     df_modifie = st.data_editor(df_base, num_rows="dynamic", use_container_width=True, key="editeur")
 
+    # Si on fait une modif sur le site, ça sauvegarde sur le Google Sheets
     if not df_base.equals(df_modifie):
         st.session_state.portefeuille = df_modifie.to_dict('records')
         sauvegarder_donnees(st.session_state.portefeuille)
@@ -120,11 +137,11 @@ else:
             t = str(ticker).strip().upper()
             try:
                 data = yf.Ticker(t)
-                # 1. Le Prix (On utilise history qui est plus stable que .info)
+                # 1. Le Prix
                 prix_local = data.history(period="1d")['Close'].iloc[-1]
                 devise = data.fast_info.get("currency", "EUR")
                 
-                # 2. Le Dividende (Séparé pour ne pas faire planter le prix si Yahoo bloque)
+                # 2. Le Dividende
                 div_local = 0
                 try:
                     div_local = data.info.get('dividendRate', 0) or 0
