@@ -47,11 +47,15 @@ def charger_donnees():
         
         return df_sheet.dropna(subset=["Ticker"]).to_dict('records')
         
-    except gspread.exceptions.PermissionError:
-        st.error("❌ Erreur de permission : As-tu partagé le Sheets avec l'email du bot ?")
-        return []
     except Exception as e:
-        st.error(f"❌ Erreur inconnue : {e}")
+        # On analyse le texte de l'erreur sans faire planter Streamlit
+        erreur_str = str(e).lower()
+        if "permission" in erreur_str or "403" in erreur_str:
+            st.error("❌ Erreur de permission (403) : As-tu partagé le Sheets avec l'email du bot en tant qu'Éditeur ?")
+        elif "404" in erreur_str:
+            st.error("❌ Erreur 404 : Fichier introuvable. L'ID de ton Google Sheet est-il correct ?")
+        else:
+            st.error(f"❌ Erreur de lecture : {e}")
         return []
 
 def sauvegarder_donnees(portefeuille):
