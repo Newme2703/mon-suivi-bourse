@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 
 st.set_page_config(layout="wide")
 
-# 🔗 L'ID DE TON GOOGLE SHEET
+# 🔗 LE NOUVEL ID DE TON GOOGLE SHEET
 ID_SHEET = "14sSa2p27u2oY9EsJxaNP6CFX4HUznYJojnPprI6vDBY"
 FICHIER_HISTORIQUE = "historique_patrimoine.csv"
 
@@ -48,7 +48,6 @@ def charger_donnees():
         return df_sheet.dropna(subset=["Ticker"]).to_dict('records')
         
     except Exception as e:
-        # On analyse le texte de l'erreur sans faire planter Streamlit
         erreur_str = str(e).lower()
         if "permission" in erreur_str or "403" in erreur_str:
             st.error("❌ Erreur de permission (403) : As-tu partagé le Sheets avec l'email du bot en tant qu'Éditeur ?")
@@ -67,7 +66,6 @@ def sauvegarder_donnees(portefeuille):
     except Exception as e:
         st.error(f"Erreur de sauvegarde : {e}")
 
-# CES FONCTIONS SONT BIEN DE RETOUR 👇
 def charger_historique():
     if os.path.exists(FICHIER_HISTORIQUE):
         return pd.read_csv(FICHIER_HISTORIQUE)
@@ -94,8 +92,6 @@ def style_plus_value(val):
 st.sidebar.header("🔐 Accès Restreint")
 mot_de_passe_saisi = st.sidebar.text_input("Mot de passe pour modifier", type="password")
 
-# On vérifie si le mot de passe correspond à celui des Secrets
-# Si "APP_PASSWORD" n'est pas trouvé dans les secrets, on bloque par défaut pour éviter les fuites
 try:
     est_autorise = (mot_de_passe_saisi == st.secrets["APP_PASSWORD"])
 except:
@@ -220,56 +216,4 @@ else:
     total_investi = df["Valeur Investie (€)"].sum()
     total_actuel = df["Valeur Actuelle (€)"].sum()
     total_pv = total_actuel - total_investi
-    total_pv_pct = (total_pv / total_investi * 100) if total_investi > 0 else 0
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Patrimoine Total", f"{total_actuel:.2f} €")
-    c2.metric("Total Investi", f"{total_investi:.2f} €")
-    c3.metric("Performance Globale", f"{total_pv:.2f} €", f"{total_pv_pct:.2f} %")
-    
-    st.subheader("💸 Ma Machine à Cash")
-    total_div_an = df["Rente Annuelle (€)"].sum()
-    rendement_moyen = (total_div_an / total_investi * 100) if total_investi > 0 else 0
-    
-    c4, c5, c6 = st.columns(3)
-    c4.metric("Rente Annuelle", f"{total_div_an:.2f} € / an")
-    c5.metric("Soit par mois", f"{(total_div_an / 12):.2f} € / mois")
-    c6.metric("Rendement (Yield on Cost)", f"{rendement_moyen:.2f} %")
-    
-    st.divider()
-
-    # --- 8. TABLEAU AVEC COULEURS ---
-    colonnes_a_afficher = ["Compte", "Ticker", "Devise", "Quantité", "PRU", "Cours Actuel (€)", "Valeur Actuelle (€)", "Plus-Value (%)", "Dividende / Action (€)", "Rente Annuelle (€)"]
-    df_final = df[colonnes_a_afficher].sort_values(by="Compte")
-    df_final = df_final.fillna(0) 
-
-    st.dataframe(df_final.style.format({
-        "Quantité": "{:.4f}", "PRU": "{:.2f} €", "Cours Actuel (€)": "{:.2f} €",
-        "Valeur Actuelle (€)": "{:.2f} €", "Plus-Value (%)": "{:.2f} %",
-        "Dividende / Action (€)": "{:.2f} €", "Rente Annuelle (€)": "{:.2f} €"
-    }).map(style_plus_value, subset=['Plus-Value (%)']), use_container_width=True)
-
-    # --- 9. LES GRAPHIQUES (SUNBURST + LIGNE DE TEMPS) ---
-    st.divider()
-    col_gauche, col_droite = st.columns(2)
-    with col_gauche:
-        st.subheader("☀️ Répartition")
-        fig_sun = px.sunburst(df_final, path=['Compte', 'Ticker'], values='Valeur Actuelle (€)')
-        fig_sun.update_traces(textinfo='label+percent entry')
-        st.plotly_chart(fig_sun, use_container_width=True)
-    with col_droite:
-        st.subheader("📈 Évolution")
-        
-        # Le bouton d'enregistrement n'est visible que si on est autorisé
-        if est_autorise:
-            if st.button("📸 Enregistrer la valeur d'aujourd'hui"):
-                enregistrer_snapshot(total_actuel)
-                st.success("Enregistré !")
-        else:
-            st.info("🔒 Connecte-toi avec le mot de passe pour enregistrer un point d'historique.")
-            
-        df_hist = charger_historique()
-        if not df_hist.empty:
-            fig_line = px.line(df_hist, x="Date", y="Patrimoine Total (€)", markers=True)
-            fig_line.update_traces(fill='tozeroy', line_color='#00b4d8') 
-            st.plotly_chart(fig_line, use_container_width=True)
+    total_pv_pct = (total_pv / total_investi * 100) if total_investi > 0 else
