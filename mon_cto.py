@@ -19,7 +19,6 @@ st.title("🌍 Mon Patrimoine Global (Sync Directe Sheets)")
 @st.cache_resource
 def connecter_google_sheets():
     scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-    # Utilise la clé cachée dans les Secrets Streamlit
     creds = Credentials.from_service_account_info(st.secrets["gcp_service_account"], scopes=scope)
     client = gspread.authorize(creds)
     return client.open_by_key(ID_SHEET).get_worksheet(0)
@@ -27,12 +26,10 @@ def connecter_google_sheets():
 def charger_donnees():
     try:
         sheet = connecter_google_sheets()
-        # 🛠️ CORRECTIF PRU : On demande la valeur BRUTE (UNFORMATTED_VALUE) 
-        # pour éviter que 12,50 soit lu comme 1250 par erreur de locale.
+        # 🛠️ On garde bien la valeur brute pour éviter le bug des virgules
         data = sheet.get_all_records(value_render_option='UNFORMATTED_VALUE')
         df_sheet = pd.DataFrame(data)
         
-        # Sécurité : Conversion des chiffres
         for col in ["Quantité", "PRU"]:
             if col in df_sheet.columns:
                 df_sheet[col] = pd.to_numeric(df_sheet[col].astype(str).str.replace(',', '.'), errors='coerce')
@@ -47,7 +44,6 @@ def sauvegarder_donnees(portefeuille):
         df = pd.DataFrame(portefeuille)
         sheet = connecter_google_sheets()
         sheet.clear()
-        # On met à jour avec les colonnes + les données en direct
         sheet.update([df.columns.values.tolist()] + df.values.tolist())
     except Exception as e:
         st.error(f"Erreur de sauvegarde : {e}")
@@ -74,61 +70,77 @@ def style_plus_value(val):
         return 'color: #dc3545; font-weight: bold' # Rouge
     return 'color: #6c757d' # Gris
 
-# --- 2. INITIALISATION ---
+# --- 2. SÉCURITÉ : VÉRIFICATION DU MOT DE PASSE ---
+st.sidebar.header("🔐 Accès Restreint")
+mot_de_passe_saisi = st.sidebar.text_input("Mot de passe pour modifier", type="password")
+
+try:
+    est_autorise = (mot_de_passe_saisi == st.secrets["APP_PASSWORD"])
+except:
+    est_autorise = False
+    st.sidebar.error("⚠️ Clé 'APP_PASSWORD' manquante dans les Secrets Streamlit.")
+
+if est_autorise:
+    st.sidebar.success("Mode Édition Activé")
+else:
+    if mot_de_passe_saisi:
+        st.sidebar.error("Mot de passe incorrect")
+    st.sidebar.info("Mode consultation actif. Mot de passe requis pour modifier.")
+
+# --- 3. INITIALISATION ---
 if 'portefeuille' not in st.session_state:
     st.session_state.portefeuille = charger_donnees()
 
-# --- 3. FORMULAIRE D'AJOUT RAPIDE ---
+# --- 4. FORMULAIRE D'AJOUT RAPIDE (Protégé) ---
 st.sidebar.header("➕ Ajouter une ligne")
 
 if st.sidebar.button("🔄 Forcer Synchro Sheets"):
     st.session_state.portefeuille = charger_donnees()
     st.rerun()
 
-with st.sidebar.form("ajout_ligne", clear_on_submit=True):
-    type_compte = st.selectbox("Choix du Compte", ["CTO", "PEA", "Crypto", "Autre"])
-    nouveau_ticker = st.text_input("Symbole (ex: AI.PA, BTC-EUR)")
-    
-    # 🛠️ Rappel : Utilise text_input pour que le clavier mobile accepte les virgules
-    nouvelle_quantite_str = st.text_input("Quantité (utilise , ou .)", value="0")
-    nouveau_pru_str = st.text_input("PRU (€)", value="0")
-    
-    bouton_ajout = st.form_submit_button("Ajouter")
+if est_autorise:
+    with st.sidebar.form("ajout_ligne", clear_on_submit=True):
+        type_compte = st.selectbox("Choix du Compte", ["CTO", "PEA", "Crypto", "Autre"])
+        nouveau_ticker = st.text_input("Symbole (ex: AI.PA, BTC-EUR)")
+        nouvelle_quantite_str = st.text_input("Quantité (utilise , ou .)", value="0")
+        nouveau_pru_str = st.text_input("PRU (€)", value="0")
+        bouton_ajout = st.form_submit_button("Ajouter")
 
-    if bouton_ajout and nouveau_ticker:
-        try:
-            # On remplace les virgules par des points et on transforme le texte en chiffre
-            qte_finale = float(nouvelle_quantite_str.replace(',', '.'))
-            pru_final = float(nouveau_pru_str.replace(',', '.'))
-            
-            nouvelle_action = {
-                "Compte": type_compte,
-                "Ticker": nouveau_ticker.upper().strip(),
-                "Quantité": qte_finale,
-                "PRU": pru_final
-            }
-            st.session_state.portefeuille.append(nouvelle_action)
+        if bouton_ajout and nouveau_ticker:
+            try:
+                qte_finale = float(nouvelle_quantite_str.replace(',', '.'))
+                pru_final = float(nouveau_pru_str.replace(',', '.'))
+                
+                nouvelle_action = {
+                    "Compte": type_compte,
+                    "Ticker": nouveau_ticker.upper().strip(),
+                    "Quantité": qte_finale,
+                    "PRU": pru_final
+                }
+                st.session_state.portefeuille.append(nouvelle_action)
+                sauvegarder_donnees(st.session_state.portefeuille)
+                st.success(f"{nouveau_ticker} ajouté dans {type_compte} !")
+                st.rerun()
+            except ValueError:
+                st.error("⚠️ Erreur : Veille à bien taper uniquement des chiffres.")
+else:
+    st.sidebar.warning("🔒 Formulaire d'ajout verrouillé")
+
+# --- 5. GESTION DES LIGNES (Protégé) ---
+if est_autorise:
+    with st.expander("🛠️ Gérer mes actifs (Modifier ou Supprimer)"):
+        df_base = pd.DataFrame(st.session_state.portefeuille)
+        if df_base.empty:
+            df_base = pd.DataFrame(columns=["Compte", "Ticker", "Quantité", "PRU"])
+
+        df_modifie = st.data_editor(df_base, num_rows="dynamic", use_container_width=True, key="editeur")
+
+        if not df_base.equals(df_modifie):
+            st.session_state.portefeuille = df_modifie.to_dict('records')
             sauvegarder_donnees(st.session_state.portefeuille)
-            st.success(f"{nouveau_ticker} ajouté dans {type_compte} !")
             st.rerun()
-        except ValueError:
-            st.error("⚠️ Erreur : Veille à bien taper uniquement des chiffres pour la Quantité et le PRU.")
-            
-# --- 4. GESTION DES LIGNES ---
-with st.expander("🛠️ Gérer mes actifs (Modifier ou Supprimer)"):
-    df_base = pd.DataFrame(st.session_state.portefeuille)
-    if df_base.empty:
-        df_base = pd.DataFrame(columns=["Compte", "Ticker", "Quantité", "PRU"])
 
-    df_modifie = st.data_editor(df_base, num_rows="dynamic", use_container_width=True, key="editeur")
-
-    # Si on fait une modif sur le site, ça sauvegarde sur le Google Sheets
-    if not df_base.equals(df_modifie):
-        st.session_state.portefeuille = df_modifie.to_dict('records')
-        sauvegarder_donnees(st.session_state.portefeuille)
-        st.rerun()
-
-# --- 5. AFFICHAGE ET CALCULS ---
+# --- 6. AFFICHAGE ET CALCULS ---
 if not st.session_state.portefeuille:
     st.info("Ton portefeuille est vide. Ajoute un actif pour commencer.")
     total_actuel = 0
@@ -149,11 +161,9 @@ else:
             t = str(ticker).strip().upper()
             try:
                 data = yf.Ticker(t)
-                # 1. Le Prix
                 prix_local = data.history(period="1d")['Close'].iloc[-1]
                 devise = data.fast_info.get("currency", "EUR")
                 
-                # 2. Le Dividende
                 div_local = 0
                 try:
                     div_local = data.info.get('dividendRate', 0) or 0
@@ -183,7 +193,7 @@ else:
     df["Dividende / Action (€)"] = dividendes_par_action
     df["Rente Annuelle (€)"] = df["Quantité"] * df["Dividende / Action (€)"]
 
-    # --- 6. RÉSUMÉS ---
+    # --- 7. RÉSUMÉS ---
     st.header("📊 Vue Détaillée")
     total_investi = df["Valeur Investie (€)"].sum()
     total_actuel = df["Valeur Actuelle (€)"].sum()
@@ -206,7 +216,7 @@ else:
     
     st.divider()
 
-    # --- 7. TABLEAU AVEC COULEURS ---
+    # --- 8. TABLEAU AVEC COULEURS ---
     colonnes_a_afficher = ["Compte", "Ticker", "Devise", "Quantité", "PRU", "Cours Actuel (€)", "Valeur Actuelle (€)", "Plus-Value (%)", "Dividende / Action (€)", "Rente Annuelle (€)"]
     df_final = df[colonnes_a_afficher].sort_values(by="Compte")
     df_final = df_final.fillna(0) 
@@ -217,7 +227,7 @@ else:
         "Dividende / Action (€)": "{:.2f} €", "Rente Annuelle (€)": "{:.2f} €"
     }).map(style_plus_value, subset=['Plus-Value (%)']), use_container_width=True)
 
-    # --- 8. LES GRAPHIQUES (SUNBURST + LIGNE DE TEMPS) ---
+    # --- 9. LES GRAPHIQUES (SUNBURST + LIGNE DE TEMPS) ---
     st.divider()
     col_gauche, col_droite = st.columns(2)
     with col_gauche:
@@ -227,9 +237,15 @@ else:
         st.plotly_chart(fig_sun, use_container_width=True)
     with col_droite:
         st.subheader("📈 Évolution")
-        if st.button("📸 Enregistrer la valeur d'aujourd'hui"):
-            enregistrer_snapshot(total_actuel)
-            st.success("Enregistré !")
+        
+        # Le bouton d'enregistrement n'est cliquable que si on est autorisé
+        if est_autorise:
+            if st.button("📸 Enregistrer la valeur d'aujourd'hui"):
+                enregistrer_snapshot(total_actuel)
+                st.success("Enregistré !")
+        else:
+            st.info("🔒 Saisissez le mot de passe pour enregistrer un point d'historique.")
+            
         df_hist = charger_historique()
         if not df_hist.empty:
             fig_line = px.line(df_hist, x="Date", y="Patrimoine Total (€)", markers=True)
