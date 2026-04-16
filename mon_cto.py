@@ -9,7 +9,7 @@ from google.oauth2.service_account import Credentials
 
 st.set_page_config(layout="wide")
 
-# 🔗 L'ID DE TON GOOGLE SHEET (Extrait de ton lien)
+# 🔗 L'ID DE TON GOOGLE SHEET
 ID_SHEET = "14sSa2p27u2oY9EsJxaNP6CFX4HUznYJojnPprI6vDBY"
 FICHIER_HISTORIQUE = "historique_patrimoine.csv"
 
@@ -27,7 +27,9 @@ def connecter_google_sheets():
 def charger_donnees():
     try:
         sheet = connecter_google_sheets()
-        data = sheet.get_all_records()
+        # 🛠️ CORRECTIF PRU : On demande la valeur BRUTE (UNFORMATTED_VALUE) 
+        # pour éviter que 12,50 soit lu comme 1250 par erreur de locale.
+        data = sheet.get_all_records(value_render_option='UNFORMATTED_VALUE')
         df_sheet = pd.DataFrame(data)
         
         # Sécurité : Conversion des chiffres
@@ -87,7 +89,7 @@ with st.sidebar.form("ajout_ligne", clear_on_submit=True):
     type_compte = st.selectbox("Choix du Compte", ["CTO", "PEA", "Crypto", "Autre"])
     nouveau_ticker = st.text_input("Symbole (ex: AI.PA, BTC-EUR)")
     
-    # 🛠️ CORRECTION : On utilise text_input au lieu de number_input
+    # 🛠️ Rappel : Utilise text_input pour que le clavier mobile accepte les virgules
     nouvelle_quantite_str = st.text_input("Quantité (utilise , ou .)", value="0")
     nouveau_pru_str = st.text_input("PRU (€)", value="0")
     
@@ -110,7 +112,6 @@ with st.sidebar.form("ajout_ligne", clear_on_submit=True):
             st.success(f"{nouveau_ticker} ajouté dans {type_compte} !")
             st.rerun()
         except ValueError:
-            # Sécurité au cas où on tape des lettres au lieu de chiffres
             st.error("⚠️ Erreur : Veille à bien taper uniquement des chiffres pour la Quantité et le PRU.")
             
 # --- 4. GESTION DES LIGNES ---
