@@ -216,4 +216,4 @@ else:
     total_investi = df["Valeur Investie (€)"].sum()
     total_actuel = df["Valeur Actuelle (€)"].sum()
     total_pv = total_actuel - total_investi
-    total_pv_pct = (total_pv / total_investi * 100) if total_investi > 0 else
+    total_pv_pct = (total_pv / total_investi * 100) if total_investi > 0 else 0
