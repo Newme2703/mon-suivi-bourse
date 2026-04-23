@@ -270,8 +270,40 @@ if page == "📊 Portefeuille Global":
         use_container_width=True, hide_index=True)
 
         st.divider()
-        st.subheader("☀️ Répartition par Actif")
-        st.plotly_chart(px.sunburst(df, path=['Compte', 'Ticker'], values='Valeur Actuelle (€)'), use_container_width=True)
+        
+        # ==========================================
+        # 📊 NOUVEAUX GRAPHIQUES CÔTE À CÔTE
+        # ==========================================
+        col_g, col_d = st.columns(2)
+        
+        with col_g:
+            st.subheader("☀️ Répartition")
+            fig_pie = px.sunburst(df_filtre, path=['Compte', 'Ticker'], values='Valeur Actuelle (€)')
+            fig_pie.update_layout(margin=dict(t=10, l=10, r=10, b=10))
+            st.plotly_chart(fig_pie, use_container_width=True)
+            
+        with col_d:
+            st.subheader("📊 Gains / Pertes par ligne")
+            df_bar = df_filtre.copy()
+            # Attribution de la couleur en fonction du signe de la plus-value
+            df_bar["Couleur"] = df_bar["Plus-Value (€)"].apply(lambda x: "Gain" if x >= 0 else "Perte")
+            
+            fig_bar = px.bar(
+                df_bar.sort_values("Plus-Value (€)", ascending=False), # Tri du plus grand au plus petit
+                x="Ticker",
+                y="Plus-Value (€)",
+                color="Couleur",
+                color_discrete_map={"Gain": "#28a745", "Perte": "#dc3545"}, # Vert et Rouge
+                text_auto='.0f' # Affiche le montant arrondi sur les barres
+            )
+            fig_bar.update_layout(
+                showlegend=False, 
+                xaxis_title="", 
+                yaxis_title="Plus-Value (€)",
+                margin=dict(t=10, l=10, r=10, b=10)
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
+
 
 # ==========================================
 # PAGE 2 : HISTORIQUE DES TRANSACTIONS
@@ -311,12 +343,10 @@ elif page == "📜 Historique des Transactions":
     if not df_trans.empty:
         st.subheader("Gérer l'historique")
         
-        # NOUVEAU : Barre de recherche Historique
         recherche_trans = st.text_input("🔍 Filtrer les transactions (par Ticker, Date ou Motif...)", placeholder="Ex: AMZN, ACHAT, 12/05/2025...")
         
         df_trans_affiche = df_trans.copy()
         if recherche_trans:
-            # Filtre sur toutes les colonnes en mode texte
             mask = df_trans_affiche.astype(str).apply(lambda x: x.str.contains(recherche_trans, case=False)).any(axis=1)
             df_trans_affiche = df_trans_affiche[mask]
         
@@ -429,7 +459,6 @@ elif page == "📈 Bilan & Performance (Compta)":
             
             st.divider()
             
-            # NOUVEAU : Filtres Bilan & Performance
             st.subheader("🔍 Filtrer le Bilan")
             fb1, fb2 = st.columns([2, 1])
             recherche_bilan = fb1.text_input("Rechercher un actif (Ticker ou Nom)", placeholder="Ex: AMZN, Booking...")
