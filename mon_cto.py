@@ -17,7 +17,6 @@ ID_SHEET = "14sSa2p27u2oY9EsJxaNP6CFX4HUznYJojnPprI6vDBY"
 # ==========================================
 st.markdown("""
 <style>
-    /* Style pour les indicateurs (KPI Cards) */
     div[data-testid="metric-container"] {
         background-color: #ffffff;
         border: 1px solid #eef0f2;
@@ -30,14 +29,12 @@ st.markdown("""
         transform: translateY(-2px);
         box-shadow: 0 6px 12px rgba(0,0,0,0.05);
     }
-    /* Style pour les titres de métriques */
     div[data-testid="metric-container"] label {
         color: #5f6368 !important;
         font-size: 14px !important;
         font-weight: 600 !important;
         text-transform: uppercase;
     }
-    /* Style pour les valeurs des métriques */
     div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
         font-size: 24px !important;
         color: #1a73e8 !important;
@@ -221,7 +218,6 @@ if page == "📊 Portefeuille Global":
         df["Valeur Investie (€)"] = df["Quantité"] * df["PRU"]
         df["Valeur Actuelle (€)"] = df["Quantité"] * df["Cours Actuel (€)"]
         
-        # Calculs Plus-Values & Poids
         df["Plus-Value (€)"] = df["Valeur Actuelle (€)"] - df["Valeur Investie (€)"]
         df["Plus-Value (%)"] = ((df["Plus-Value (€)"] / df["Valeur Investie (€)"] * 100) if (df["Valeur Investie (€)"].sum() > 0) else 0).fillna(0)
         
@@ -233,7 +229,6 @@ if page == "📊 Portefeuille Global":
         df["Potentiel (%)"] = df.apply(lambda r: ((r["Objectif (€)"] - r["Cours Actuel (€)"]) / r["Cours Actuel (€)"] * 100) if r["Objectif (€)"] > 0 else 0, axis=1)
         df["Potentiel / PRU (%)"] = df.apply(lambda r: ((r["Objectif (€)"] - r["PRU"]) / r["PRU"] * 100) if r["Objectif (€)"] > 0 and r["PRU"] > 0 else 0, axis=1)
 
-        # AFFICHAGE MÉTRIQUES (DANS DES COLONNES)
         st.header("📊 Vue Détaillée")
         c1, c2, c3 = st.columns(3)
         c1.metric("Patrimoine Total", f"{t_act:.2f} €")
@@ -249,16 +244,12 @@ if page == "📊 Portefeuille Global":
         
         st.divider()
 
-        # ==========================================
-        # 3. FILTRES AU DESSUS DU TABLEAU
-        # ==========================================
         st.subheader("🔍 Filtres & Détail des positions")
         f1, f2, f3 = st.columns([2, 1, 1])
         recherche = f1.text_input("Chercher une valeur (Ticker ou Nom)", placeholder="Ex: LVMH, AI.PA...")
         filtre_compte = f2.selectbox("Compte", ["Tous"] + LISTE_COMPTES)
         filtre_perf = f3.selectbox("Performance", ["Tous", "Gagnantes 🟢", "Perdantes 🔴"])
 
-        # Logique de filtrage du DataFrame
         df_filtre = df.copy()
         if recherche:
             df_filtre = df_filtre[df_filtre["Ticker"].str.contains(recherche, case=False) | df_filtre["Nom"].str.contains(recherche, case=False)]
@@ -269,7 +260,6 @@ if page == "📊 Portefeuille Global":
         elif filtre_perf == "Perdantes 🔴":
             df_filtre = df_filtre[df_filtre["Plus-Value (€)"] < 0]
 
-        # Ordre des colonnes
         cols_tab = ["Compte", "Ticker", "Nom", "Quantité", "PRU", "Cours Actuel (€)", "Objectif (€)", "Potentiel (%)", "Potentiel / PRU (%)", "Valeur Actuelle (€)", "Plus-Value (€)", "Plus-Value (%)", "Poids (%)", "Rente Annuelle (€)"]
         
         st.dataframe(df_filtre[cols_tab].style.format({
@@ -320,13 +310,27 @@ elif page == "📜 Historique des Transactions":
     df_trans = charger_transactions()
     if not df_trans.empty:
         st.subheader("Gérer l'historique")
-        if est_autorise:
-            df_trans_mod = st.data_editor(df_trans, num_rows="dynamic", use_container_width=True, hide_index=True, key="trans_editor")
-            if not df_trans.equals(df_trans_mod):
+        
+        # NOUVEAU : Barre de recherche Historique
+        recherche_trans = st.text_input("🔍 Filtrer les transactions (par Ticker, Date ou Motif...)", placeholder="Ex: AMZN, ACHAT, 12/05/2025...")
+        
+        df_trans_affiche = df_trans.copy()
+        if recherche_trans:
+            # Filtre sur toutes les colonnes en mode texte
+            mask = df_trans_affiche.astype(str).apply(lambda x: x.str.contains(recherche_trans, case=False)).any(axis=1)
+            df_trans_affiche = df_trans_affiche[mask]
+        
+        if est_autorise and not recherche_trans:
+            st.info("💡 Tu peux modifier ou supprimer une ligne (corbeille) directement dans le tableau ci-dessous.")
+            df_trans_mod = st.data_editor(df_trans_affiche, num_rows="dynamic", use_container_width=True, hide_index=True, key="trans_editor")
+            if not df_trans_affiche.equals(df_trans_mod):
                 sauvegarder_transactions(df_trans_mod)
                 st.rerun()
+        elif est_autorise and recherche_trans:
+            st.warning("⚠️ L'édition est désactivée pendant une recherche pour éviter d'écraser des données.")
+            st.dataframe(df_trans_affiche, use_container_width=True, hide_index=True)
         else:
-            st.dataframe(df_trans, use_container_width=True, hide_index=True)
+            st.dataframe(df_trans_affiche, use_container_width=True, hide_index=True)
     else:
         st.info("Aucune transaction n'a été trouvée dans Google Sheets.")
 
@@ -424,7 +428,22 @@ elif page == "📈 Bilan & Performance (Compta)":
             m3.metric("Total Dividendes", f"{df_recap['Dividendes (€)'].sum():.2f} €")
             
             st.divider()
-            st.dataframe(df_recap.style.format({
+            
+            # NOUVEAU : Filtres Bilan & Performance
+            st.subheader("🔍 Filtrer le Bilan")
+            fb1, fb2 = st.columns([2, 1])
+            recherche_bilan = fb1.text_input("Rechercher un actif (Ticker ou Nom)", placeholder="Ex: AMZN, Booking...")
+            filtre_perf_bilan = fb2.selectbox("Performance", ["Tous", "Gagnantes 🟢", "Perdantes 🔴"])
+
+            df_recap_filtre = df_recap.copy()
+            if recherche_bilan:
+                df_recap_filtre = df_recap_filtre[df_recap_filtre["Ticker"].str.contains(recherche_bilan, case=False) | df_recap_filtre["Nom"].str.contains(recherche_bilan, case=False)]
+            if filtre_perf_bilan == "Gagnantes 🟢":
+                df_recap_filtre = df_recap_filtre[df_recap_filtre["Gain / Perte Total (€)"] > 0]
+            elif filtre_perf_bilan == "Perdantes 🔴":
+                df_recap_filtre = df_recap_filtre[df_recap_filtre["Gain / Perte Total (€)"] < 0]
+
+            st.dataframe(df_recap_filtre.style.format({
                 "Solde Actions": "{:.4f}", "Acheté (€)": "{:.2f} €", "Vendu (€)": "{:.2f} €", "Dividendes (€)": "{:.2f} €",
                 "Frais (€)": "{:.2f} €", "Valeur Actuelle (€)": "{:.2f} €", "Gain / Perte Total (€)": "{:.2f} €", "Rentabilité (%)": "{:.2f} %"
             }).map(style_plus_value, subset=['Gain / Perte Total (€)', 'Rentabilité (%)']), 
