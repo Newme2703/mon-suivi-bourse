@@ -78,6 +78,43 @@ def style_plus_value(val):
     return 'color: #6c757d'
 
 # ==========================================
+# NOUVEAU : FONCTION ANTI-BLOCAGE YAHOO FINANCE (CACHE)
+# ==========================================
+@st.cache_data(ttl=3600) # Garde en mémoire pendant 1 heure (3600 secondes)
+def obtenir_donnees_marche(tickers_list):
+    """Télécharge les données Yahoo Finance une seule fois et les mémorise."""
+    cours_actuels, devises, dividendes, objectifs, noms = [], [], [], [], []
+    
+    try: taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
+    except: taux_usd_eur = 0.92
+        
+    for t in tickers_list:
+        try:
+            t_str = str(t).strip().upper()
+            data = yf.Ticker(t_str)
+            nom_entreprise = data.info.get('shortName', t_str)
+            prix_local = data.history(period="1d")['Close'].iloc[-1]
+            dev = data.fast_info.get("currency", "EUR")
+            div_local = data.info.get('dividendRate', 0) or 0
+            obj_local = data.info.get('targetMeanPrice', 0) or 0
+            coef = taux_usd_eur if dev == "USD" else 1
+                
+            noms.append(nom_entreprise)
+            cours_actuels.append(prix_local * coef)
+            devises.append(dev)
+            dividendes.append(div_local * coef)
+            objectifs.append(obj_local * coef)
+        except Exception as e:
+            # st.toast(f"⚠️ Yahoo a bloqué {t}")
+            noms.append(str(t))
+            cours_actuels.append(0)
+            devises.append("Err")
+            dividendes.append(0)
+            objectifs.append(0)
+            
+    return cours_actuels, devises, dividendes, objectifs, noms, taux_usd_eur
+
+# ==========================================
 # 2. VARIABLES GLOBALES & SÉCURITÉ
 # ==========================================
 LISTE_COMPTES = ["CTO", "PEA", "Crypto", "Espèce", "Autre"]
@@ -112,7 +149,9 @@ if page == "📊 Portefeuille Global":
         st.session_state.portefeuille = charger_donnees()
 
     st.sidebar.header("➕ Ajouter une ligne")
-    if st.sidebar.button("🔄 Forcer Synchro Sheets"):
+    if st.sidebar.button("🔄 Forcer Synchro Sheets & Prix"):
+        # Vide le cache pour forcer Yahoo à re-télécharger
+        st.cache_data.clear() 
         st.session_state.portefeuille = charger_donnees()
         st.rerun()
 
@@ -132,6 +171,7 @@ if page == "📊 Portefeuille Global":
                     }
                     st.session_state.portefeuille.append(nouvelle_action)
                     sauvegarder_donnees(st.session_state.portefeuille)
+                    st.cache_data.clear() # On vide le cache si on ajoute une action
                     st.rerun()
                 except ValueError:
                     st.error("Chiffres invalides !")
@@ -153,42 +193,15 @@ if page == "📊 Portefeuille Global":
     else:
         df = pd.DataFrame(st.session_state.portefeuille)
         
-        with st.spinner("Analyse du marché en cours..."):
-            try: taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
-            except: taux_usd_eur = 0.92
-                
-            cours_actuels, devises, dividendes, objectifs, noms = [], [], [], [], []
-            
-            for ticker in df["Ticker"]:
-                try:
-                    t_str = str(ticker).strip().upper()
-                    data = yf.Ticker(t_str)
-                    nom_entreprise = data.info.get('shortName', t_str)
-                    prix_local = data.history(period="1d")['Close'].iloc[-1]
-                    devise = data.fast_info.get("currency", "EUR")
-                    div_local = data.info.get('dividendRate', 0) or 0
-                    obj_local = data.info.get('targetMeanPrice', 0) or 0
-                    coef = taux_usd_eur if devise == "USD" else 1
-                        
-                    noms.append(nom_entreprise)
-                    cours_actuels.append(prix_local * coef)
-                    devises.append(devise)
-                    dividendes.append(div_local * coef)
-                    objectifs.append(obj_local * coef)
-                except Exception as e:
-                    st.toast(f"⚠️ YF n'a pas pu charger {ticker}")
-                    noms.append(str(ticker))
-                    cours_actuels.append(0)
-                    devises.append("Err")
-                    dividendes.append(0)
-                    objectifs.append(0)
+        with st.spinner("Récupération des données marché..."):
+            # Appel de la fonction cachée
+            cours_actuels, devises, dividendes, objectifs, noms, _ = obtenir_donnees_marche(df["Ticker"].tolist())
 
         df["Nom"] = noms
         df["Cours Actuel (€)"] = cours_actuels
         df["Valeur Investie (€)"] = df["Quantité"] * df["PRU"]
         df["Valeur Actuelle (€)"] = df["Quantité"] * df["Cours Actuel (€)"]
         
-        # CALCULS PLUS-VALUES (AJOUT DU MONTANT ICI)
         df["Plus-Value (€)"] = df["Valeur Actuelle (€)"] - df["Valeur Investie (€)"]
         df["Plus-Value (%)"] = (df["Plus-Value (€)"] / df["Valeur Investie (€)"] * 100).fillna(0)
         
@@ -213,7 +226,6 @@ if page == "📊 Portefeuille Global":
         c6.metric("Yield on Cost", f"{(total_div_an / t_inv * 100 if t_inv>0 else 0):.2f} %")
         
         st.divider()
-        # MISE À JOUR DE L'ORDRE DES COLONNES
         cols_tab = ["Compte", "Ticker", "Nom", "Quantité", "PRU", "Cours Actuel (€)", "Objectif (€)", "Potentiel (%)", "Potentiel / PRU (%)", "Valeur Actuelle (€)", "Plus-Value (€)", "Plus-Value (%)", "Rente Annuelle (€)"]
         st.dataframe(df[cols_tab].style.format({
             "Quantité": "{:.4f}", "PRU": "{:.2f} €", "Cours Actuel (€)": "{:.2f} €", "Objectif (€)": "{:.2f} €",
@@ -252,6 +264,7 @@ elif page == "📜 Historique des Transactions":
                                                       float(qte_t.replace(',', '.')), float(prix_t.replace(',', '.')), 
                                                       float(frais_t.replace(',', '.')), compte_t)
                         if success: 
+                            st.cache_data.clear() # Vider le cache après transaction
                             st.success("✅ Transaction enregistrée avec succès !")
                             st.rerun()
                     except ValueError: 
@@ -267,6 +280,7 @@ elif page == "📜 Historique des Transactions":
             df_trans_mod = st.data_editor(df_trans, num_rows="dynamic", use_container_width=True, hide_index=True, key="trans_editor")
             if not df_trans.equals(df_trans_mod):
                 sauvegarder_transactions(df_trans_mod)
+                st.cache_data.clear()
                 st.rerun()
         else:
             st.dataframe(df_trans, use_container_width=True, hide_index=True)
@@ -281,7 +295,7 @@ elif page == "📈 Bilan & Performance (Compta)":
     
     df_trans = charger_transactions()
     if df_trans.empty:
-        st.info("Aucune transaction trouvée pour générer le bilan. Remplis d'abord ton Historique.")
+        st.info("Aucune transaction trouvée pour générer le bilan.")
     else:
         for col in ["Quantité", "Prix", "Frais"]:
             df_trans[col] = pd.to_numeric(df_trans[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
@@ -305,13 +319,16 @@ elif page == "📈 Bilan & Performance (Compta)":
         df_assets = df_trans[df_trans["Ticker"].str.upper() != "CASH"]
         if not df_assets.empty:
             recap = []
-            tickers = df_assets["Ticker"].unique()
+            tickers_uniques = df_assets["Ticker"].unique().tolist()
             
             with st.spinner("Calcul des gains..."):
-                try: taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
-                except: taux_usd_eur = 0.92
+                # Utilisation du cache pour cette page aussi !
+                cours, devs, divs, objs, noms, taux_usd = obtenir_donnees_marche(tickers_uniques)
+                # Création d'un mini-dictionnaire pour associer le prix au Ticker
+                dict_prix = dict(zip(tickers_uniques, cours))
+                dict_noms = dict(zip(tickers_uniques, noms))
                 
-                for t in tickers:
+                for t in tickers_uniques:
                     dft = df_assets[df_assets["Ticker"] == t]
                     achats = dft[dft["Type"] == "ACHAT"]
                     ventes = dft[dft["Type"] == "VENTE"]
@@ -323,27 +340,8 @@ elif page == "📈 Bilan & Performance (Compta)":
                     frais_actif = dft["Frais"].sum()
                     solde_qte = achats["Quantité"].sum() - ventes["Quantité"].sum()
                     
-                    prix_actuel = 0
-                    nom_entreprise = str(t).upper() 
-                    
-                    if solde_qte > 0.0001:
-                        try:
-                            t_str = str(t).strip().upper()
-                            data = yf.Ticker(t_str)
-                            nom_entreprise = data.info.get('shortName', t_str)
-                            p_local = data.history(period="1d")['Close'].iloc[-1]
-                            dev = data.fast_info.get("currency", "EUR")
-                            coef = taux_usd_eur if dev == "USD" else 1
-                            prix_actuel = p_local * coef
-                        except Exception as e:
-                            st.toast(f"⚠️ YF n'a pas pu charger {t}")
-                            prix_actuel = 0
-                    else:
-                        try:
-                            t_str = str(t).strip().upper()
-                            data = yf.Ticker(t_str)
-                            nom_entreprise = data.info.get('shortName', t_str)
-                        except: pass
+                    prix_actuel = dict_prix.get(t, 0) if solde_qte > 0.0001 else 0
+                    nom_entreprise = dict_noms.get(t, str(t))
                             
                     valeur_actuelle = solde_qte * prix_actuel
                     pnl = (valeur_actuelle + vol_vente + vol_div) - (vol_achat + frais_actif)
