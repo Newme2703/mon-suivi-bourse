@@ -142,7 +142,7 @@ if page == "📊 Portefeuille Global":
         with st.expander("🛠️ Gérer mes actifs (Modifier ou Supprimer)"):
             df_base = pd.DataFrame(st.session_state.portefeuille)
             if df_base.empty: df_base = pd.DataFrame(columns=["Compte", "Ticker", "Quantité", "PRU"])
-            df_modifie = st.data_editor(df_base, num_rows="dynamic", use_container_width=True, key="editeur")
+            df_modifie = st.data_editor(df_base, num_rows="dynamic", use_container_width=True, hide_index=True, key="editeur")
             if not df_base.equals(df_modifie):
                 st.session_state.portefeuille = df_modifie.to_dict('records')
                 sauvegarder_donnees(st.session_state.portefeuille)
@@ -176,7 +176,6 @@ if page == "📊 Portefeuille Global":
                     dividendes.append(div_local * coef)
                     objectifs.append(obj_local * coef)
                 except Exception as e:
-                    # Message furtif pour t'avertir si Yahoo Finance bloque l'accès
                     st.toast(f"⚠️ YF n'a pas pu charger {ticker}")
                     noms.append(str(ticker))
                     cours_actuels.append(0)
@@ -188,7 +187,11 @@ if page == "📊 Portefeuille Global":
         df["Cours Actuel (€)"] = cours_actuels
         df["Valeur Investie (€)"] = df["Quantité"] * df["PRU"]
         df["Valeur Actuelle (€)"] = df["Quantité"] * df["Cours Actuel (€)"]
-        df["Plus-Value (%)"] = ((df["Cours Actuel (€)"] - df["PRU"]) / df["PRU"] * 100).fillna(0)
+        
+        # CALCULS PLUS-VALUES (AJOUT DU MONTANT ICI)
+        df["Plus-Value (€)"] = df["Valeur Actuelle (€)"] - df["Valeur Investie (€)"]
+        df["Plus-Value (%)"] = (df["Plus-Value (€)"] / df["Valeur Investie (€)"] * 100).fillna(0)
+        
         df["Rente Annuelle (€)"] = df["Quantité"] * dividendes
         df["Objectif (€)"] = objectifs
         df["Potentiel (%)"] = df.apply(lambda r: ((r["Objectif (€)"] - r["Cours Actuel (€)"]) / r["Cours Actuel (€)"] * 100) if r["Objectif (€)"] > 0 else 0, axis=1)
@@ -210,12 +213,13 @@ if page == "📊 Portefeuille Global":
         c6.metric("Yield on Cost", f"{(total_div_an / t_inv * 100 if t_inv>0 else 0):.2f} %")
         
         st.divider()
-        cols_tab = ["Compte", "Ticker", "Nom", "Quantité", "PRU", "Cours Actuel (€)", "Objectif (€)", "Potentiel (%)", "Potentiel / PRU (%)", "Valeur Actuelle (€)", "Plus-Value (%)", "Rente Annuelle (€)"]
+        # MISE À JOUR DE L'ORDRE DES COLONNES
+        cols_tab = ["Compte", "Ticker", "Nom", "Quantité", "PRU", "Cours Actuel (€)", "Objectif (€)", "Potentiel (%)", "Potentiel / PRU (%)", "Valeur Actuelle (€)", "Plus-Value (€)", "Plus-Value (%)", "Rente Annuelle (€)"]
         st.dataframe(df[cols_tab].style.format({
             "Quantité": "{:.4f}", "PRU": "{:.2f} €", "Cours Actuel (€)": "{:.2f} €", "Objectif (€)": "{:.2f} €",
             "Potentiel (%)": "{:.2f} %", "Potentiel / PRU (%)": "{:.2f} %", "Valeur Actuelle (€)": "{:.2f} €",
-            "Plus-Value (%)": "{:.2f} %", "Rente Annuelle (€)": "{:.2f} €"
-        }).map(style_plus_value, subset=['Plus-Value (%)', 'Potentiel (%)', 'Potentiel / PRU (%)']), use_container_width=True)
+            "Plus-Value (€)": "{:.2f} €", "Plus-Value (%)": "{:.2f} %", "Rente Annuelle (€)": "{:.2f} €"
+        }).map(style_plus_value, subset=['Plus-Value (€)', 'Plus-Value (%)', 'Potentiel (%)', 'Potentiel / PRU (%)']), use_container_width=True, hide_index=True)
 
         st.divider()
         st.subheader("☀️ Répartition par Actif")
@@ -260,12 +264,12 @@ elif page == "📜 Historique des Transactions":
         st.subheader("Gérer l'historique")
         st.info("💡 Tu peux modifier ou supprimer une ligne (corbeille) directement dans le tableau ci-dessous.")
         if est_autorise:
-            df_trans_mod = st.data_editor(df_trans, num_rows="dynamic", use_container_width=True, key="trans_editor")
+            df_trans_mod = st.data_editor(df_trans, num_rows="dynamic", use_container_width=True, hide_index=True, key="trans_editor")
             if not df_trans.equals(df_trans_mod):
                 sauvegarder_transactions(df_trans_mod)
                 st.rerun()
         else:
-            st.dataframe(df_trans, use_container_width=True)
+            st.dataframe(df_trans, use_container_width=True, hide_index=True)
     else:
         st.info("Aucune transaction n'a été trouvée dans Google Sheets.")
 
@@ -303,7 +307,7 @@ elif page == "📈 Bilan & Performance (Compta)":
             recap = []
             tickers = df_assets["Ticker"].unique()
             
-            with st.spinner("Calcul des gains et récupération des noms et prix en direct..."):
+            with st.spinner("Calcul des gains..."):
                 try: taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
                 except: taux_usd_eur = 0.92
                 
@@ -358,12 +362,12 @@ elif page == "📈 Bilan & Performance (Compta)":
             tot_pnl_pct = (tot_pnl / tot_achete * 100) if tot_achete > 0 else 0
             
             m1, m2, m3 = st.columns(3)
-            m1.metric("Gains/Pertes Nets (Toutes positions)", f"{tot_pnl:.2f} €")
-            m2.metric("Rentabilité Globale Nette", f"{tot_pnl_pct:.2f} %")
-            m3.metric("Total Dividendes Encaissés", f"{df_recap['Dividendes (€)'].sum():.2f} €")
+            m1.metric("Gains/Pertes Nets", f"{tot_pnl:.2f} €")
+            m2.metric("Rentabilité Globale", f"{tot_pnl_pct:.2f} %")
+            m3.metric("Total Dividendes", f"{df_recap['Dividendes (€)'].sum():.2f} €")
             
             st.divider()
             st.dataframe(df_recap.style.format({
                 "Solde Actions": "{:.4f}", "Acheté (€)": "{:.2f} €", "Vendu (€)": "{:.2f} €", "Dividendes (€)": "{:.2f} €",
                 "Frais (€)": "{:.2f} €", "Valeur Actuelle (€)": "{:.2f} €", "Gain / Perte Total (€)": "{:.2f} €", "Rentabilité (%)": "{:.2f} %"
-            }).map(style_plus_value, subset=['Gain / Perte Total (€)', 'Rentabilité (%)']), use_container_width=True)
+            }).map(style_plus_value, subset=['Gain / Perte Total (€)', 'Rentabilité (%)']), use_container_width=True, hide_index=True)
