@@ -41,7 +41,7 @@ st.markdown("""
     
     /* Chiffres des métriques */
     [data-testid="stMetricValue"] {
-        color: #1a73e8 !important;
+        color: #202124 !important;
         font-size: 26px !important;
         font-weight: 700 !important;
     }
