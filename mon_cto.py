@@ -13,31 +13,33 @@ st.set_page_config(layout="wide", page_title="Mon Patrimoine Pro")
 ID_SHEET = "14sSa2p27u2oY9EsJxaNP6CFX4HUznYJojnPprI6vDBY"
 
 # ==========================================
-# 🎨 STYLE CSS (AMÉLIORATION ESTHÉTIQUE)
+# 🎨 STYLE CSS AVANCÉ (AMÉLIORATION ESTHÉTIQUE)
 # ==========================================
+# C'est ici que l'on définit l'encadrement avec des bords ronds (border-radius)
 st.markdown("""
 <style>
+    /* 1. Style pour les cartes d'indicateurs (KPIs) */
     div[data-testid="metric-container"] {
         background-color: #ffffff;
         border: 1px solid #eef0f2;
         padding: 15px 20px;
-        border-radius: 12px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.02);
-        transition: transform 0.2s ease-in-out;
+        border-radius: 12px; /* Bords ronds ! */
+        box-shadow: 0 4px 6px rgba(0,0,0,0.02); /* Légère ombre */
     }
-    div[data-testid="metric-container"]:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 12px rgba(0,0,0,0.05);
+
+    /* 2. Style pour encadrer les conteneurs de graphiques Plotly */
+    [data-testid="stPlotlyChart"] {
+        background-color: #ffffff;
+        border: 1px solid #eef0f2;
+        padding: 20px; /* Espace intérieur pour le graphique respire */
+        border-radius: 12px; /* Bords ronds ! */
+        box-shadow: 0 4px 6px rgba(0,0,0,0.02); /* Légère ombre */
     }
+
+    /* Quelques ajustements pour les titres et les textes */
     div[data-testid="metric-container"] label {
         color: #5f6368 !important;
-        font-size: 14px !important;
         font-weight: 600 !important;
-        text-transform: uppercase;
-    }
-    div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
-        font-size: 24px !important;
-        color: #1a73e8 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -187,39 +189,35 @@ if page == "📊 Portefeuille Global":
             try: taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
             except: taux_usd_eur = 0.92
                 
-            cours_actuels, devises, dividendes, objectifs, noms = [], [], [], [], []
+            cours_actuels, devises, dividendes, objectifs = [], [], [], []
             
             for ticker in df["Ticker"]:
                 try:
                     t_str = str(ticker).strip().upper()
                     data = yf.Ticker(t_str)
-                    nom_entreprise = data.info.get('shortName', t_str)
                     prix_local = data.history(period="1d")['Close'].iloc[-1]
                     devise = data.fast_info.get("currency", "EUR")
                     div_local = data.info.get('dividendRate', 0) or 0
                     obj_local = data.info.get('targetMeanPrice', 0) or 0
                     coef = taux_usd_eur if devise == "USD" else 1
                         
-                    noms.append(nom_entreprise)
                     cours_actuels.append(prix_local * coef)
                     devises.append(devise)
                     dividendes.append(div_local * coef)
                     objectifs.append(obj_local * coef)
                 except Exception as e:
                     st.toast(f"⚠️ YF n'a pas pu charger {ticker}")
-                    noms.append(str(ticker))
                     cours_actuels.append(0)
                     devises.append("Err")
                     dividendes.append(0)
                     objectifs.append(0)
 
-        df["Nom"] = noms
         df["Cours Actuel (€)"] = cours_actuels
         df["Valeur Investie (€)"] = df["Quantité"] * df["PRU"]
         df["Valeur Actuelle (€)"] = df["Quantité"] * df["Cours Actuel (€)"]
         
         df["Plus-Value (€)"] = df["Valeur Actuelle (€)"] - df["Valeur Investie (€)"]
-        df["Plus-Value (%)"] = ((df["Plus-Value (€)"] / df["Valeur Investie (€)"] * 100) if (df["Valeur Investie (€)"].sum() > 0) else 0).fillna(0)
+        df["Plus-Value (%)"] = ((df["Cours Actuel (€)"] - df["PRU"]) / df["PRU"] * 100).fillna(0)
         
         t_inv, t_act = df["Valeur Investie (€)"].sum(), df["Valeur Actuelle (€)"].sum()
         df["Poids (%)"] = (df["Valeur Actuelle (€)"] / t_act * 100).fillna(0)
@@ -252,7 +250,7 @@ if page == "📊 Portefeuille Global":
 
         df_filtre = df.copy()
         if recherche:
-            df_filtre = df_filtre[df_filtre["Ticker"].str.contains(recherche, case=False) | df_filtre["Nom"].str.contains(recherche, case=False)]
+            df_filtre = df_filtre[df_filtre["Ticker"].str.contains(recherche, case=False)]
         if filtre_compte != "Tous":
             df_filtre = df_filtre[df_filtre["Compte"] == filtre_compte]
         if filtre_perf == "Gagnantes 🟢":
@@ -260,7 +258,7 @@ if page == "📊 Portefeuille Global":
         elif filtre_perf == "Perdantes 🔴":
             df_filtre = df_filtre[df_filtre["Plus-Value (€)"] < 0]
 
-        cols_tab = ["Compte", "Ticker", "Nom", "Quantité", "PRU", "Cours Actuel (€)", "Objectif (€)", "Potentiel (%)", "Potentiel / PRU (%)", "Valeur Actuelle (€)", "Plus-Value (€)", "Plus-Value (%)", "Poids (%)", "Rente Annuelle (€)"]
+        cols_tab = ["Compte", "Ticker", "Quantité", "PRU", "Cours Actuel (€)", "Objectif (€)", "Potentiel (%)", "Potentiel / PRU (%)", "Valeur Actuelle (€)", "Plus-Value (€)", "Plus-Value (%)", "Poids (%)", "Rente Annuelle (€)"]
         
         st.dataframe(df_filtre[cols_tab].style.format({
             "Quantité": "{:.4f}", "PRU": "{:.2f} €", "Cours Actuel (€)": "{:.2f} €", "Objectif (€)": "{:.2f} €",
@@ -272,35 +270,33 @@ if page == "📊 Portefeuille Global":
         st.divider()
         
         # ==========================================
-        # 📊 NOUVEAUX GRAPHIQUES CÔTE À CÔTE
+        # 📊 GRAPHIQUES ENCADRÉS AVEC BORDS RONDS
         # ==========================================
         col_g, col_d = st.columns(2)
         
+        # J'ai ajusté les marges internes pour que les graphiques respirent dans leurs cadres
         with col_g:
             st.subheader("☀️ Répartition")
             fig_pie = px.sunburst(df_filtre, path=['Compte', 'Ticker'], values='Valeur Actuelle (€)')
-            fig_pie.update_layout(margin=dict(t=10, l=10, r=10, b=10))
+            fig_pie.update_layout(margin=dict(t=20, l=20, r=20, b=20)) # Marges internes
             st.plotly_chart(fig_pie, use_container_width=True)
             
         with col_d:
             st.subheader("📊 Gains / Pertes par ligne")
             df_bar = df_filtre.copy()
-            # Attribution de la couleur en fonction du signe de la plus-value
             df_bar["Couleur"] = df_bar["Plus-Value (€)"].apply(lambda x: "Gain" if x >= 0 else "Perte")
             
             fig_bar = px.bar(
-                df_bar.sort_values("Plus-Value (€)", ascending=False), # Tri du plus grand au plus petit
+                df_bar.sort_values("Plus-Value (€)", ascending=False),
                 x="Ticker",
                 y="Plus-Value (€)",
                 color="Couleur",
-                color_discrete_map={"Gain": "#28a745", "Perte": "#dc3545"}, # Vert et Rouge
-                text_auto='.0f' # Affiche le montant arrondi sur les barres
+                color_discrete_map={"Gain": "#28a745", "Perte": "#dc3545"},
+                text_auto='.0f'
             )
             fig_bar.update_layout(
-                showlegend=False, 
-                xaxis_title="", 
-                yaxis_title="Plus-Value (€)",
-                margin=dict(t=10, l=10, r=10, b=10)
+                showlegend=False, xaxis_title="", 
+                margin=dict(t=20, l=20, r=20, b=20) # Marges internes
             )
             st.plotly_chart(fig_bar, use_container_width=True)
 
@@ -415,13 +411,11 @@ elif page == "📈 Bilan & Performance (Compta)":
                     solde_qte = achats["Quantité"].sum() - ventes["Quantité"].sum()
                     
                     prix_actuel = 0
-                    nom_entreprise = str(t).upper() 
                     
                     if solde_qte > 0.0001:
                         try:
                             t_str = str(t).strip().upper()
                             data = yf.Ticker(t_str)
-                            nom_entreprise = data.info.get('shortName', t_str)
                             p_local = data.history(period="1d")['Close'].iloc[-1]
                             dev = data.fast_info.get("currency", "EUR")
                             coef = taux_usd_eur if dev == "USD" else 1
@@ -429,19 +423,13 @@ elif page == "📈 Bilan & Performance (Compta)":
                         except Exception as e:
                             st.toast(f"⚠️ YF n'a pas pu charger {t}")
                             prix_actuel = 0
-                    else:
-                        try:
-                            t_str = str(t).strip().upper()
-                            data = yf.Ticker(t_str)
-                            nom_entreprise = data.info.get('shortName', t_str)
-                        except: pass
                             
                     valeur_actuelle = solde_qte * prix_actuel
                     pnl = (valeur_actuelle + vol_vente + vol_div) - (vol_achat + frais_actif)
                     pnl_pct = (pnl / vol_achat * 100) if vol_achat > 0 else 0
                     
                     recap.append({
-                        "Ticker": t, "Nom": nom_entreprise, "Solde Actions": solde_qte, "Acheté (€)": vol_achat,
+                        "Ticker": t, "Solde Actions": solde_qte, "Acheté (€)": vol_achat,
                         "Vendu (€)": vol_vente, "Dividendes (€)": vol_div, "Frais (€)": frais_actif,
                         "Valeur Actuelle (€)": valeur_actuelle, "Gain / Perte Total (€)": pnl, "Rentabilité (%)": pnl_pct
                     })
@@ -466,7 +454,8 @@ elif page == "📈 Bilan & Performance (Compta)":
 
             df_recap_filtre = df_recap.copy()
             if recherche_bilan:
-                df_recap_filtre = df_recap_filtre[df_recap_filtre["Ticker"].str.contains(recherche_bilan, case=False) | df_recap_filtre["Nom"].str.contains(recherche_bilan, case=False)]
+                mask_bilan = df_recap_filtre.astype(str).apply(lambda x: x.str.contains(recherche_bilan, case=False)).any(axis=1)
+                df_recap_filtre = df_recap_filtre[mask_bilan]
             if filtre_perf_bilan == "Gagnantes 🟢":
                 df_recap_filtre = df_recap_filtre[df_recap_filtre["Gain / Perte Total (€)"] > 0]
             elif filtre_perf_bilan == "Perdantes 🔴":
