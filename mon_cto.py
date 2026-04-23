@@ -13,60 +13,60 @@ st.set_page_config(layout="wide", page_title="Mon Portefeuille")
 ID_SHEET = "14sSa2p27u2oY9EsJxaNP6CFX4HUznYJojnPprI6vDBY"
 
 # ==========================================
-# 🎨 STYLE CSS (MODE DASHBOARD : CARTES BLANCHES SUR FOND GRIS)
+# 🎨 STYLE CSS (ULTRA-CLEAN : WHITE CARDS ON GREY)
 # ==========================================
 st.markdown("""
 <style>
-    /* 1. Fond global de l'application en gris clair */
+    /* 1. Fond global gris clair */
     [data-testid="stAppViewContainer"] {
-        background-color: #f4f6f9;
+        background-color: #f8f9fb;
     }
     
-    /* 2. Cartes d'indicateurs (KPIs) : Fond blanc, Bords très ronds */
+    /* 2. Style des cartes blanches pour les indicateurs (KPIs) */
     div[data-testid="metric-container"] {
-        background-color: #ffffff;
-        border: 1px solid #eef0f2;
-        padding: 15px 20px;
-        border-radius: 15px; /* Plus arrondi pour l'effet carte */
-        box-shadow: 0 4px 10px rgba(0,0,0,0.04); /* Ombre douce */
+        background-color: #ffffff !important;
+        border: 1px solid #ebedef;
+        padding: 20px !important;
+        border-radius: 20px !important; /* Bords très ronds */
+        box-shadow: 0 4px 12px rgba(0,0,0,0.03) !important;
+        transition: transform 0.3s ease;
+    }
+    div[data-testid="metric-container"]:hover {
+        transform: translateY(-5px); /* Petit effet au survol */
     }
     
-    /* Titres des métriques */
+    /* Titres et chiffres des métriques */
     div[data-testid="metric-container"] label {
         color: #5f6368 !important;
-        font-size: 14px !important;
         font-weight: 500 !important;
+        margin-bottom: 10px;
     }
-    
-    /* Valeurs des métriques */
     div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
-        font-size: 24px !important;
-        color: #1a73e8 !important; 
-        font-weight: 600 !important;
+        color: #1a73e8 !important;
+        font-weight: 700 !important;
     }
-    
-    /* 3. Cadres des graphiques : Fond blanc, Bords très ronds */
-    [data-testid="stPlotlyChart"] {
+
+    /* 3. Style des cadres de graphiques et tableaux */
+    [data-testid="stPlotlyChart"], [data-testid="stDataFrame"], [data-testid="stDataEditor"] {
         background-color: #ffffff;
-        border: 1px solid #eef0f2;
-        padding: 15px;
-        border-radius: 15px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.04);
+        border: 1px solid #ebedef;
+        padding: 20px;
+        border-radius: 20px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.03);
     }
     
-    /* 4. Tableaux (Dataframes) : Fond blanc, Bords très ronds */
-    [data-testid="stDataFrame"], [data-testid="stDataEditor"] {
-        background-color: #ffffff;
-        border: 1px solid #eef0f2;
-        border-radius: 15px;
-        padding: 15px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.04);
-    }
-    
-    /* Ajustement des titres de sections pour le contraste */
-    h1, h2, h3 {
+    /* 4. Titres de section */
+    h3 {
         color: #202124 !important;
-        font-weight: 500 !important;
+        font-size: 1.2rem !important;
+        margin-bottom: 15px !important;
+        margin-top: 25px !important;
+        padding-left: 5px;
+    }
+    
+    /* On cache le fond blanc par défaut de Streamlit pour les colonnes */
+    [data-testid="column"] {
+        border-radius: 20px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -84,11 +84,14 @@ def charger_donnees():
     try:
         sheet = connecter_client().get_worksheet(0)
         data = sheet.get_all_records(value_render_option='UNFORMATTED_VALUE')
-        if not data: return []
+        if not data: 
+            return []
+        
         df_sheet = pd.DataFrame(data)
         for col in ["Quantité", "PRU"]:
             if col in df_sheet.columns:
                 df_sheet[col] = pd.to_numeric(df_sheet[col].astype(str).str.replace(',', '.'), errors='coerce')
+                
         return df_sheet.dropna(subset=["Ticker"]).to_dict('records')
     except Exception as e:
         st.error(f"Erreur de lecture Portefeuille : {e}")
@@ -117,7 +120,7 @@ def sauvegarder_transactions(df_trans):
         sheet.clear()
         df_save = df_trans.copy()
         sheet.update([df_save.columns.values.tolist()] + df_save.values.tolist())
-        st.success("Historique mis à jour dans Google Sheets.")
+        st.success("✅ Historique mis à jour dans Google Sheets !")
     except Exception as e:
         st.error(f"Erreur de sauvegarde Transactions : {e}")
 
@@ -131,9 +134,12 @@ def ajouter_transaction(date, t_type, ticker, qte, prix, frais, compte):
         return False
 
 def style_plus_value(val):
-    if pd.isna(val): return ''
-    if val > 0: return 'color: #1e8e3e; font-weight: bold' 
-    elif val < 0: return 'color: #d93025; font-weight: bold'
+    if pd.isna(val): 
+        return ''
+    if val > 0: 
+        return 'color: #1e8e3e; font-weight: bold' 
+    elif val < 0: 
+        return 'color: #d93025; font-weight: bold'
     return 'color: #5f6368'
 
 # ==========================================
@@ -142,20 +148,20 @@ def style_plus_value(val):
 LISTE_COMPTES = ["CTO", "PEA", "Crypto", "Espèce", "Autre"]
 LISTE_MOTIFS = ["ACHAT", "VENTE", "DIVIDENDE", "PAIEMENT", "DÉPÔT", "RETRAIT"]
 
-st.sidebar.header("Accès sécurisé")
+st.sidebar.header("🔐 Accès sécurisé")
 mot_de_passe_saisi = st.sidebar.text_input("Mot de passe pour modifier", type="password")
 
 try:
     est_autorise = (mot_de_passe_saisi == st.secrets["APP_PASSWORD"])
 except:
     est_autorise = False
-    st.sidebar.error("Clé 'APP_PASSWORD' manquante dans les Secrets.")
+    st.sidebar.error("⚠️ Clé 'APP_PASSWORD' manquante dans les Secrets.")
 
 st.sidebar.divider()
 page = st.sidebar.radio("Navigation", [
     "Tableau de bord", 
-    "Historique des transactions", 
-    "Bilan comptable"
+    "Journal des opérations", 
+    "Bilan de performance"
 ])
 
 # ==========================================
@@ -164,20 +170,22 @@ page = st.sidebar.radio("Navigation", [
 if page == "Tableau de bord":
     st.title("Mon portefeuille")
     
-    if est_autorise: st.sidebar.success("Mode Édition : Activé")
-    else: st.sidebar.info("Mode Consultation : Activé")
+    if est_autorise: 
+        st.sidebar.success("Mode Édition : Activé")
+    else: 
+        st.sidebar.info("Mode Consultation : Activé")
 
     if 'portefeuille' not in st.session_state:
         st.session_state.portefeuille = charger_donnees()
 
-    st.sidebar.header("Nouvelle position")
-    if st.sidebar.button("Actualiser les données"):
+    st.sidebar.header("➕ Nouvelle position")
+    if st.sidebar.button("🔄 Actualiser les prix"):
         st.session_state.portefeuille = charger_donnees()
         st.rerun()
 
     if est_autorise:
         with st.sidebar.form("ajout_ligne", clear_on_submit=True):
-            type_compte = st.selectbox("Compte", LISTE_COMPTES)
+            type_compte = st.selectbox("Choix du Compte", LISTE_COMPTES)
             nouveau_ticker = st.text_input("Symbole (ex: AI.PA)")
             nouvelle_quantite_str = st.text_input("Quantité", value="0")
             nouveau_pru_str = st.text_input("PRU (€)", value="0")
@@ -185,7 +193,8 @@ if page == "Tableau de bord":
             if st.form_submit_button("Ajouter la ligne"):
                 try:
                     nouvelle_action = {
-                        "Compte": type_compte, "Ticker": nouveau_ticker.upper().strip(),
+                        "Compte": type_compte, 
+                        "Ticker": nouveau_ticker.upper().strip(),
                         "Quantité": float(nouvelle_quantite_str.replace(',', '.')),
                         "PRU": float(nouveau_pru_str.replace(',', '.'))
                     }
@@ -193,28 +202,33 @@ if page == "Tableau de bord":
                     sauvegarder_donnees(st.session_state.portefeuille)
                     st.rerun()
                 except ValueError:
-                    st.error("Chiffres invalides.")
+                    st.error("Chiffres invalides !")
     else:
-        st.sidebar.warning("Saisie verrouillée")
+        st.sidebar.warning("🔒 Saisie verrouillée")
 
     if est_autorise:
-        with st.expander("Éditer les positions actives"):
+        with st.expander("🛠️ Éditer les positions actives (Modifier ou Supprimer)"):
             df_base = pd.DataFrame(st.session_state.portefeuille)
-            if df_base.empty: df_base = pd.DataFrame(columns=["Compte", "Ticker", "Quantité", "PRU"])
+            if df_base.empty: 
+                df_base = pd.DataFrame(columns=["Compte", "Ticker", "Quantité", "PRU"])
+            
             df_modifie = st.data_editor(df_base, num_rows="dynamic", use_container_width=True, hide_index=True, key="editeur")
+            
             if not df_base.equals(df_modifie):
                 st.session_state.portefeuille = df_modifie.to_dict('records')
                 sauvegarder_donnees(st.session_state.portefeuille)
                 st.rerun()
 
     if not st.session_state.portefeuille:
-        st.info("Le portefeuille est vide.")
+        st.info("Ton portefeuille est vide.")
     else:
         df = pd.DataFrame(st.session_state.portefeuille)
         
         with st.spinner("Analyse du marché en cours..."):
-            try: taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
-            except: taux_usd_eur = 0.92
+            try: 
+                taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
+            except: 
+                taux_usd_eur = 0.92
                 
             cours_actuels, devises, dividendes, objectifs, noms = [], [], [], [], []
             
@@ -235,7 +249,7 @@ if page == "Tableau de bord":
                     dividendes.append(div_local * coef)
                     objectifs.append(obj_local * coef)
                 except Exception as e:
-                    st.toast(f"Impossible de charger {ticker}")
+                    st.toast(f"⚠️ Impossible de charger {ticker}")
                     noms.append(str(ticker))
                     cours_actuels.append(0)
                     devises.append("Err")
@@ -250,7 +264,8 @@ if page == "Tableau de bord":
         df["Plus-Value (€)"] = df["Valeur Actuelle (€)"] - df["Valeur Investie (€)"]
         df["Plus-Value (%)"] = ((df["Plus-Value (€)"] / df["Valeur Investie (€)"] * 100) if (df["Valeur Investie (€)"].sum() > 0) else 0).fillna(0)
         
-        t_inv, t_act = df["Valeur Investie (€)"].sum(), df["Valeur Actuelle (€)"].sum()
+        t_inv = df["Valeur Investie (€)"].sum()
+        t_act = df["Valeur Actuelle (€)"].sum()
         df["Poids (%)"] = (df["Valeur Actuelle (€)"] / t_act * 100).fillna(0)
 
         df["Rente Annuelle (€)"] = df["Quantité"] * dividendes
@@ -276,17 +291,22 @@ if page == "Tableau de bord":
         
         st.divider()
 
+        # -----------------------------
+        # FILTRES ET TABLEAU
+        # -----------------------------
         st.markdown("### Détail des positions")
         f1, f2, f3 = st.columns([2, 1, 1])
-        recherche = f1.text_input("Rechercher un actif", placeholder="Ex: LVMH, AI.PA...")
+        recherche = f1.text_input("🔍 Rechercher un actif", placeholder="Ex: LVMH, AI.PA...")
         filtre_compte = f2.selectbox("Compte", ["Tous"] + LISTE_COMPTES)
         filtre_perf = f3.selectbox("Statut performance", ["Toutes", "Gagnantes 🟢", "Perdantes 🔴"])
 
         df_filtre = df.copy()
         if recherche:
             df_filtre = df_filtre[df_filtre["Ticker"].str.contains(recherche, case=False) | df_filtre["Nom"].str.contains(recherche, case=False)]
+        
         if filtre_compte != "Tous":
             df_filtre = df_filtre[df_filtre["Compte"] == filtre_compte]
+            
         if filtre_perf == "Gagnantes 🟢":
             df_filtre = df_filtre[df_filtre["Plus-Value (€)"] > 0]
         elif filtre_perf == "Perdantes 🔴":
@@ -303,6 +323,9 @@ if page == "Tableau de bord":
 
         st.divider()
         
+        # -----------------------------
+        # GRAPHIQUES
+        # -----------------------------
         col_g, col_d = st.columns(2)
         with col_g:
             st.markdown("### Répartition par actif")
@@ -334,41 +357,44 @@ if page == "Tableau de bord":
 # ==========================================
 # PAGE 2 : HISTORIQUE DES TRANSACTIONS
 # ==========================================
-elif page == "Historique des transactions":
-    st.title("Journal des opérations")
+elif page == "Journal des opérations":
+    st.title("📜 Journal des opérations")
     
     if est_autorise:
-        with st.expander("Enregistrer une nouvelle transaction", expanded=True):
+        with st.expander("➕ Enregistrer une nouvelle transaction", expanded=True):
             with st.form("form_transac", clear_on_submit=True):
                 c1, c2, c3 = st.columns(3)
                 date_t = c1.date_input("Date de la transaction", datetime.now())
-                type_t = c2.selectbox("Type d'opération", LISTE_MOTIFS)
-                ticker_t = c3.text_input("Symbole (ou 'CASH')")
+                type_t = c2.selectbox("Motif", LISTE_MOTIFS)
+                ticker_t = c3.text_input("Ticker (ou 'CASH')")
                 
                 c4, c5, c6 = st.columns(3)
                 qte_t = c4.text_input("Quantité", value="0")
                 prix_t = c5.text_input("Prix Unitaire (€)", value="0")
-                frais_t = c6.text_input("Frais de courtage (€)", value="0")
+                frais_t = c6.text_input("Frais de transaction (€)", value="0")
                 
                 compte_t = st.selectbox("Compte impacté", LISTE_COMPTES)
                 
-                if st.form_submit_button("Valider la transaction"):
+                if st.form_submit_button("Enregistrer la transaction"):
                     try:
-                        success = ajouter_transaction(date_t.strftime("%d/%m/%Y"), type_t, ticker_t.strip().upper(), 
-                                                      float(qte_t.replace(',', '.')), float(prix_t.replace(',', '.')), 
-                                                      float(frais_t.replace(',', '.')), compte_t)
+                        success = ajouter_transaction(
+                            date_t.strftime("%d/%m/%Y"), type_t, ticker_t.strip().upper(), 
+                            float(qte_t.replace(',', '.')), float(prix_t.replace(',', '.')), 
+                            float(frais_t.replace(',', '.')), compte_t
+                        )
                         if success: 
                             st.rerun()
                     except ValueError: 
-                        st.error("Valeurs numériques invalides.")
+                        st.error("⚠️ Erreur : Que des chiffres pour Quantité, Prix et Frais.")
     else:
-        st.warning("Veuillez saisir le mot de passe pour ajouter des transactions.")
+        st.warning("🔒 Saisissez le mot de passe dans le menu de gauche pour ajouter des transactions.")
 
     df_trans = charger_transactions()
+    
     if not df_trans.empty:
         st.markdown("### Historique complet")
         
-        recherche_trans = st.text_input("Filtrer l'historique", placeholder="Chercher un ticker, une date, un motif...")
+        recherche_trans = st.text_input("🔍 Filtrer l'historique", placeholder="Chercher un ticker, une date, un motif...")
         
         df_trans_affiche = df_trans.copy()
         if recherche_trans:
@@ -376,28 +402,28 @@ elif page == "Historique des transactions":
             df_trans_affiche = df_trans_affiche[mask]
         
         if est_autorise and not recherche_trans:
-            st.info("Vous pouvez éditer ou supprimer une ligne directement dans le tableau.")
+            st.info("💡 Tu peux modifier ou supprimer une ligne (corbeille) directement dans le tableau ci-dessous.")
             df_trans_mod = st.data_editor(df_trans_affiche, num_rows="dynamic", use_container_width=True, hide_index=True, key="trans_editor")
             if not df_trans_affiche.equals(df_trans_mod):
                 sauvegarder_transactions(df_trans_mod)
                 st.rerun()
         elif est_autorise and recherche_trans:
-            st.caption("Mode édition désactivé pendant la recherche.")
+            st.caption("⚠️ Mode édition désactivé pendant la recherche pour protéger les données.")
             st.dataframe(df_trans_affiche, use_container_width=True, hide_index=True)
         else:
             st.dataframe(df_trans_affiche, use_container_width=True, hide_index=True)
     else:
-        st.info("Aucune transaction trouvée.")
+        st.info("Aucune transaction n'a été trouvée dans Google Sheets.")
 
 # ==========================================
 # PAGE 3 : BILAN ET PERFORMANCE (COMPTA)
 # ==========================================
-elif page == "Bilan comptable":
-    st.title("Bilan de performance globale")
+elif page == "Bilan de performance":
+    st.title("📈 Bilan de performance globale")
     
     df_trans = charger_transactions()
     if df_trans.empty:
-        st.info("Aucune donnée pour générer le bilan.")
+        st.info("Aucune transaction trouvée pour générer le bilan.")
     else:
         for col in ["Quantité", "Prix", "Frais"]:
             df_trans[col] = pd.to_numeric(df_trans[col].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
@@ -419,13 +445,16 @@ elif page == "Bilan comptable":
         st.markdown("### Rentabilité consolidée (Latent + Réalisé)")
         
         df_assets = df_trans[df_trans["Ticker"].str.upper() != "CASH"]
+        
         if not df_assets.empty:
             recap = []
             tickers = df_assets["Ticker"].unique()
             
             with st.spinner("Calcul des performances en cours..."):
-                try: taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
-                except: taux_usd_eur = 0.92
+                try: 
+                    taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
+                except: 
+                    taux_usd_eur = 0.92
                 
                 for t in tickers:
                     dft = df_assets[df_assets["Ticker"] == t]
@@ -458,7 +487,8 @@ elif page == "Bilan comptable":
                             t_str = str(t).strip().upper()
                             data = yf.Ticker(t_str)
                             nom_entreprise = data.info.get('shortName', t_str)
-                        except: pass
+                        except: 
+                            pass
                             
                     valeur_actuelle = solde_qte * prix_actuel
                     pnl = (valeur_actuelle + vol_vente + vol_div) - (vol_achat + frais_actif)
@@ -471,6 +501,7 @@ elif page == "Bilan comptable":
                     })
             
             df_recap = pd.DataFrame(recap)
+            
             st.markdown("### Résultat net d'investissement")
             tot_pnl = df_recap["Gain / Perte Total (€)"].sum()
             tot_achete = df_recap["Acheté (€)"].sum()
@@ -483,15 +514,16 @@ elif page == "Bilan comptable":
             
             st.divider()
             
-            st.markdown("### Analyse par ligne")
+            st.markdown("### Analyse détaillée par actif")
             fb1, fb2 = st.columns([2, 1])
-            recherche_bilan = fb1.text_input("Rechercher un actif", placeholder="Ex: AMZN, LVMH...", key="rech_bilan")
+            recherche_bilan = fb1.text_input("🔍 Rechercher un actif", placeholder="Ex: AMZN, LVMH...", key="rech_bilan")
             filtre_perf_bilan = fb2.selectbox("Statut performance", ["Toutes", "Gagnantes 🟢", "Perdantes 🔴"], key="perf_bilan")
 
             df_recap_filtre = df_recap.copy()
             if recherche_bilan:
                 mask_bilan = df_recap_filtre.astype(str).apply(lambda x: x.str.contains(recherche_bilan, case=False)).any(axis=1)
                 df_recap_filtre = df_recap_filtre[mask_bilan]
+                
             if filtre_perf_bilan == "Gagnantes 🟢":
                 df_recap_filtre = df_recap_filtre[df_recap_filtre["Gain / Perte Total (€)"] > 0]
             elif filtre_perf_bilan == "Perdantes 🔴":
