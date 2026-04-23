@@ -13,6 +13,26 @@ st.set_page_config(layout="wide", page_title="Mon Patrimoine Pro")
 ID_SHEET = "14sSa2p27u2oY9EsJxaNP6CFX4HUznYJojnPprI6vDBY"
 
 # ==========================================
+# TRADUCTEUR AUTOMATIQUE (ISIN -> TICKER YAHOO)
+# ==========================================
+DICTIONNAIRE_TICKERS = {
+    "FR0000120271": "TTE.PA",    # TotalEnergies
+    "FR0000120321": "OR.PA",     # L'Oréal
+    "FR0000121014": "MC.PA",     # LVMH
+    "US0231351067": "AMZN",      # Amazon
+    "FR001400U5Q4": "CW8.PA",    # Amundi MSCI World
+    "FR0011550185": "EWLD.PA",   # Lyxor PEA Monde
+    "US5949181045": "MSFT",      # Microsoft
+    "US09857L1089": "BKNG",      # Booking
+    "NL0012969182": "ASML",      # ASML
+    "DE0007164600": "SAP",       # SAP
+    "US4330001060": "GS",        # Goldman Sachs
+    "US02079K3059": "GOOGL",     # Google
+    "US92826C8394": "V",         # Visa
+    "BTC": "BTC-EUR"             # Bitcoin en Euros
+}
+
+# ==========================================
 # 1. FONCTIONS DE CONNEXION GOOGLE SHEETS
 # ==========================================
 @st.cache_resource
@@ -80,7 +100,7 @@ def style_plus_value(val):
 # ==========================================
 # 2. MÉMOIRE CACHE (ANTI-BLOCAGE YAHOO)
 # ==========================================
-@st.cache_data(ttl=1800) # Garde les prix en mémoire pendant 30 minutes
+@st.cache_data(ttl=1800) # Garde les prix en mémoire 30 minutes
 def obtenir_donnees_marche(tickers_tuple):
     cours_actuels, devises, dividendes, objectifs, noms = [], [], [], [], []
     try: taux_usd_eur = yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
@@ -88,7 +108,10 @@ def obtenir_donnees_marche(tickers_tuple):
         
     for ticker in tickers_tuple:
         try:
-            t_str = str(ticker).strip().upper()
+            t_brut = str(ticker).strip().upper()
+            # Traduction ISIN -> TICKER via notre dictionnaire
+            t_str = DICTIONNAIRE_TICKERS.get(t_brut, t_brut)
+            
             data = yf.Ticker(t_str)
             nom_entreprise = data.info.get('shortName', t_str)
             prix_local = data.history(period="1d")['Close'].iloc[-1]
@@ -147,7 +170,7 @@ if page == "📊 Portefeuille Global":
 
     st.sidebar.header("➕ Ajouter une ligne")
     if st.sidebar.button("🔄 Forcer Synchro Sheets (Actualiser Prix)"):
-        st.cache_data.clear() # Vide la mémoire pour forcer la mise à jour des prix
+        st.cache_data.clear() # Vide la mémoire
         st.session_state.portefeuille = charger_donnees()
         st.rerun()
 
@@ -191,7 +214,6 @@ if page == "📊 Portefeuille Global":
         df = pd.DataFrame(st.session_state.portefeuille)
         
         with st.spinner("Récupération des données marché..."):
-            # Appel de la fonction avec mémoire cache
             cours_actuels, devises, dividendes, objectifs, noms, taux_usd_eur = obtenir_donnees_marche(tuple(df["Ticker"].tolist()))
 
         df["Nom"] = noms
@@ -320,7 +342,6 @@ elif page == "📈 Bilan & Performance (Compta)":
             tickers_uniques = df_assets["Ticker"].unique().tolist()
             
             with st.spinner("Récupération des données marché..."):
-                # Appel de la fonction avec mémoire cache
                 cours, devs, divs, objs, noms, taux_usd = obtenir_donnees_marche(tuple(tickers_uniques))
                 
                 dict_prix = dict(zip(tickers_uniques, cours))
