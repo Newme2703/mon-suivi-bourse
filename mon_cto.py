@@ -13,52 +13,60 @@ st.set_page_config(layout="wide", page_title="Mon Portefeuille")
 ID_SHEET = "14sSa2p27u2oY9EsJxaNP6CFX4HUznYJojnPprI6vDBY"
 
 # ==========================================
-# 🎨 STYLE CSS AVANCÉ (SOBRE & PRO)
+# 🎨 STYLE CSS (MODE DASHBOARD : CARTES BLANCHES SUR FOND GRIS)
 # ==========================================
 st.markdown("""
 <style>
-    /* Cartes d'indicateurs (KPIs) - Design épuré */
+    /* 1. Fond global de l'application en gris clair */
+    [data-testid="stAppViewContainer"] {
+        background-color: #f4f6f9;
+    }
+    
+    /* 2. Cartes d'indicateurs (KPIs) : Fond blanc, Bords très ronds */
     div[data-testid="metric-container"] {
         background-color: #ffffff;
         border: 1px solid #eef0f2;
         padding: 15px 20px;
-        border-radius: 8px; /* Bords légèrement ronds, plus sérieux */
-        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        border-radius: 15px; /* Plus arrondi pour l'effet carte */
+        box-shadow: 0 4px 10px rgba(0,0,0,0.04); /* Ombre douce */
     }
     
-    /* Titres des métriques (Gris ardoise, sans majuscules forcées) */
+    /* Titres des métriques */
     div[data-testid="metric-container"] label {
         color: #5f6368 !important;
         font-size: 14px !important;
-        font-weight: 500 !important; /* Gras léger */
+        font-weight: 500 !important;
     }
     
-    /* Valeurs numériques principales */
+    /* Valeurs des métriques */
     div[data-testid="metric-container"] div[data-testid="stMetricValue"] {
         font-size: 24px !important;
-        color: #1a73e8 !important; /* Bleu institutionnel */
+        color: #1a73e8 !important; 
         font-weight: 600 !important;
     }
     
-    /* Cadres des graphiques Plotly */
+    /* 3. Cadres des graphiques : Fond blanc, Bords très ronds */
     [data-testid="stPlotlyChart"] {
         background-color: #ffffff;
         border: 1px solid #eef0f2;
         padding: 15px;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+        border-radius: 15px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.04);
     }
     
-    /* Titres des pages */
-    h1 {
-        font-weight: 400 !important;
-        color: #202124 !important;
-        padding-bottom: 20px;
+    /* 4. Tableaux (Dataframes) : Fond blanc, Bords très ronds */
+    [data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+        background-color: #ffffff;
+        border: 1px solid #eef0f2;
+        border-radius: 15px;
+        padding: 15px;
+        box-shadow: 0 4px 10px rgba(0,0,0,0.04);
     }
-    h3 {
+    
+    /* Ajustement des titres de sections pour le contraste */
+    h1, h2, h3 {
+        color: #202124 !important;
         font-weight: 500 !important;
-        color: #3c4043 !important;
-        margin-top: 30px !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -124,8 +132,8 @@ def ajouter_transaction(date, t_type, ticker, qte, prix, frais, compte):
 
 def style_plus_value(val):
     if pd.isna(val): return ''
-    if val > 0: return 'color: #1e8e3e; font-weight: bold' # Vert plus professionnel
-    elif val < 0: return 'color: #d93025; font-weight: bold' # Rouge plus professionnel
+    if val > 0: return 'color: #1e8e3e; font-weight: bold' 
+    elif val < 0: return 'color: #d93025; font-weight: bold'
     return 'color: #5f6368'
 
 # ==========================================
@@ -299,7 +307,7 @@ if page == "Tableau de bord":
         with col_g:
             st.markdown("### Répartition par actif")
             fig_pie = px.sunburst(df_filtre, path=['Compte', 'Ticker'], values='Valeur Actuelle (€)')
-            fig_pie.update_layout(margin=dict(t=20, l=20, r=20, b=20))
+            fig_pie.update_layout(margin=dict(t=20, l=20, r=20, b=20), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
             st.plotly_chart(fig_pie, use_container_width=True)
             
         with col_d:
@@ -317,7 +325,8 @@ if page == "Tableau de bord":
             )
             fig_bar.update_layout(
                 showlegend=False, xaxis_title="", 
-                margin=dict(t=20, l=20, r=20, b=20)
+                margin=dict(t=20, l=20, r=20, b=20),
+                paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)'
             )
             st.plotly_chart(fig_bar, use_container_width=True)
 
