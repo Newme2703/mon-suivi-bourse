@@ -189,7 +189,7 @@ if page == "Tableau de bord":
     if 'portefeuille' not in st.session_state:
         st.session_state.portefeuille = charger_donnees()
 
-    if st.sidebar.button("🔄 Forcer l'actualisation"):
+    if st.sidebar.button("Actualiser les données"):
         st.cache_data.clear()
         st.session_state.portefeuille = charger_donnees()
         st.rerun()
@@ -209,6 +209,17 @@ if page == "Tableau de bord":
                     st.rerun()
                 except: st.error("Erreur de format")
 
+    if est_autorise:
+        with st.expander("Éditer les positions actives (Modifier ou Supprimer)"):
+            df_base = pd.DataFrame(st.session_state.portefeuille)
+            if df_base.empty: 
+                df_base = pd.DataFrame(columns=["Compte", "Ticker", "Quantité", "PRU"])
+            df_modifie = st.data_editor(df_base, num_rows="dynamic", use_container_width=True, hide_index=True, key="editeur")
+            if not df_base.equals(df_modifie):
+                st.session_state.portefeuille = df_modifie.to_dict('records')
+                sauvegarder_donnees(st.session_state.portefeuille)
+                st.rerun()
+
     if not st.session_state.portefeuille:
         st.info("Portefeuille vide.")
     else:
@@ -222,7 +233,7 @@ if page == "Tableau de bord":
                 info = get_info_ticker(ticker)
                 
                 if info["Erreur"]:
-                    st.toast(f"⚠️ Impossible d'actualiser {ticker}")
+                    st.toast(f"Impossible d'actualiser {ticker}")
                     
                 coef = taux_usd if info["Devise"] == "USD" else 1
                 noms.append(info["Nom"])
@@ -327,7 +338,7 @@ elif page == "Journal des opérations":
     df_t = charger_transactions()
     if not df_t.empty:
         with st.container(border=True):
-            r = st.text_input("🔍 Filtrer l'historique")
+            r = st.text_input("Filtrer l'historique", placeholder="Chercher un ticker, une date, un motif...")
             df_ta = df_t.copy()
             if r:
                 mask = df_ta.astype(str).apply(lambda x: x.str.contains(r, case=False)).any(axis=1)
@@ -380,14 +391,14 @@ elif page == "Bilan comptable":
                     frais_tot = dft["Frais"].sum()
                     
                     prix_act = 0
-                    nom_entreprise = str(t)
                     
-                    # On évite de solliciter Yahoo si l'action a été revendue en totalité (Solde = 0)
+                    # On récupère systématiquement l'info pour avoir le VRAI nom de l'entreprise
+                    info = get_info_ticker(t)
+                    nom_entreprise = info["Nom"]
+                    
                     if sq > 0.0001:
-                        info = get_info_ticker(t)
                         coef = taux_usd if info["Devise"] == "USD" else 1
                         prix_act = info["Prix"] * coef
-                        nom_entreprise = info["Nom"]
                     
                     val = sq * prix_act
                     pnl = (val + v_ven + v_div) - (v_ach + frais_tot)
@@ -401,7 +412,6 @@ elif page == "Bilan comptable":
             
             df_recap = pd.DataFrame(rec)
             
-            # --- CARTES KPI RÉSULTAT NET ---
             tot_pnl = df_recap["Gain / Perte Total (€)"].sum()
             tot_achete = df_recap["Acheté (€)"].sum()
             tot_pnl_pct = (tot_pnl / tot_achete * 100) if tot_achete > 0 else 0
@@ -413,7 +423,6 @@ elif page == "Bilan comptable":
             
             st.write("")
             
-            # --- TABLEAU ENCAPSULÉ ---
             with st.container(border=True):
                 st.markdown("### Analyse détaillée par actif")
                 fb1, fb2 = st.columns([2, 1])
