@@ -1,10 +1,10 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
 import gspread
 from google.oauth2.service_account import Credentials
+import requests
 
 # Configuration de la page
 st.set_page_config(layout="wide", page_title="Tableau de bord financier")
@@ -64,36 +64,64 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🛡️ FONCTIONS DE RÉCUPÉRATION DES COURS (NOUVEAU CACHE)
+# 🛡️ FONCTIONS DE RÉCUPÉRATION DES COURS (API FMP)
 # ==========================================
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_taux_change():
-    """Récupère le taux EUR/USD et le garde en mémoire 1 heure."""
-    try:
-        return yf.Ticker("EUR=X").history(period="1d")['Close'].iloc[-1]
-    except:
+def get_taux_change(api_key):
+    """Récupère le taux de change USD -> EUR via FMP (En cache pendant 1h)."""
+    if not api_key: 
         return 0.92
+    try:
+        url = f"https://financialmodelingprep.com/api/v3/quote/EURUSD?apikey={api_key}"
+        res = requests.get(url, timeout=5).json()
+        if res and len(res) > 0:
+            # FMP donne EURUSD (ex: 1.08). Le prix USD en EUR = Prix / 1.08
+            return 1.0 / float(res[0]['price'])
+    except:
+        pass
+    return 0.92
 
 @st.cache_data(ttl=900, show_spinner=False)
-def get_info_ticker(ticker):
-    """Récupère les infos d'UN SEUL ticker et le garde en mémoire 15 min."""
+def get_info_ticker(ticker, api_key):
+    """Récupère les infos d'un Ticker via FMP (En cache pendant 15min)."""
+    t_str = str(ticker).upper().strip()
+    if not api_key:
+        return {"Nom": t_str, "Prix": 0.0, "Devise": "EUR", "Div": 0.0, "Objectif": 0.0, "Erreur": True}
+    
     try:
-        t_str = str(ticker).upper().strip()
-        data = yf.Ticker(t_str)
-        hist = data.history(period="1d")
-        if hist.empty:
-            return {"Nom": t_str, "Prix": 0.0, "Devise": "EUR", "Div": 0.0, "Objectif": 0.0, "Erreur": True}
+        # 1. On tente de récupérer le profil complet (Nom, Prix, Devise, Dividende)
+        url = f"https://financialmodelingprep.com/api/v3/profile/{t_str}?apikey={api_key}"
+        resp = requests.get(url, timeout=5).json()
         
-        return {
-            "Nom": data.info.get('shortName', t_str),
-            "Prix": hist['Close'].iloc[-1],
-            "Devise": data.fast_info.get("currency", "EUR"),
-            "Div": data.info.get('dividendRate', 0) or 0,
-            "Objectif": data.info.get('targetMeanPrice', 0) or 0,
-            "Erreur": False
-        }
-    except:
-        return {"Nom": str(ticker), "Prix": 0.0, "Devise": "EUR", "Div": 0.0, "Objectif": 0.0, "Erreur": True}
+        if resp and len(resp) > 0:
+            data = resp[0]
+            return {
+                "Nom": data.get("companyName", t_str),
+                "Prix": float(data.get("price", 0.0)),
+                "Devise": data.get("currency", "EUR"),
+                "Div": float(data.get("lastDiv", 0.0)),
+                "Objectif": 0.0,
+                "Erreur": False
+            }
+        
+        # 2. Si le profil n'existe pas (ex: certains ETF), on tente juste la cotation simple
+        url_quote = f"https://financialmodelingprep.com/api/v3/quote/{t_str}?apikey={api_key}"
+        resp_quote = requests.get(url_quote, timeout=5).json()
+        
+        if resp_quote and len(resp_quote) > 0:
+            data = resp_quote[0]
+            return {
+                "Nom": data.get("name", t_str),
+                "Prix": float(data.get("price", 0.0)),
+                "Devise": "EUR" if ".PA" in t_str else "USD", # Déduction pour la Bourse de Paris
+                "Div": 0.0,
+                "Objectif": 0.0,
+                "Erreur": False
+            }
+            
+        return {"Nom": t_str, "Prix": 0.0, "Devise": "EUR", "Div": 0.0, "Objectif": 0.0, "Erreur": True}
+    except Exception as e:
+        return {"Nom": t_str, "Prix": 0.0, "Devise": "EUR", "Div": 0.0, "Objectif": 0.0, "Erreur": True}
 
 # ==========================================
 # 1. FONCTIONS DE CONNEXION GOOGLE SHEETS
@@ -177,6 +205,13 @@ except:
     est_autorise = False
     st.sidebar.error("Clé 'APP_PASSWORD' manquante.")
 
+# Ajout de la sécurité pour la Clé API FMP
+try:
+    api_key_fmp = st.secrets["FMP_API_KEY"]
+except:
+    api_key_fmp = ""
+    st.sidebar.warning("Clé API 'FMP_API_KEY' manquante dans les Secrets. Les cours resteront à zéro.")
+
 st.sidebar.divider()
 page = st.sidebar.radio("Navigation", ["Tableau de bord", "Journal des opérations", "Bilan comptable"])
 
@@ -226,11 +261,11 @@ if page == "Tableau de bord":
         df = pd.DataFrame(st.session_state.portefeuille)
         
         with st.spinner("Récupération des cours boursiers..."):
-            taux_usd = get_taux_change()
+            taux_usd = get_taux_change(api_key_fmp)
             cours_actuels, dividendes, objectifs, noms = [], [], [], []
             
             for ticker in df["Ticker"]:
-                info = get_info_ticker(ticker)
+                info = get_info_ticker(ticker, api_key_fmp)
                 
                 if info["Erreur"]:
                     st.toast(f"Impossible d'actualiser {ticker}")
@@ -376,7 +411,7 @@ elif page == "Bilan comptable":
         if not df_a.empty:
             rec = []
             with st.spinner("Calcul des performances..."):
-                taux_usd = get_taux_change()
+                taux_usd = get_taux_change(api_key_fmp)
                 
                 for t in df_a["Ticker"].unique():
                     dft = df_a[df_a["Ticker"] == t]
@@ -392,8 +427,8 @@ elif page == "Bilan comptable":
                     
                     prix_act = 0
                     
-                    # On récupère systématiquement l'info pour avoir le VRAI nom de l'entreprise
-                    info = get_info_ticker(t)
+                    # On récupère l'info pour avoir le VRAI nom de l'entreprise
+                    info = get_info_ticker(t, api_key_fmp)
                     nom_entreprise = info["Nom"]
                     
                     if sq > 0.0001:
