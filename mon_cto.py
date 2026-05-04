@@ -64,64 +64,65 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 🛡️ FONCTIONS DE RÉCUPÉRATION DES COURS (API FMP)
+# 🛡️ MOTEUR DE COURS "TIR GROUPÉ" (ANTI-BLOCAGE)
 # ==========================================
-@st.cache_data(ttl=3600, show_spinner=False)
-def get_taux_change(api_key):
-    """Récupère le taux de change USD -> EUR via FMP (En cache pendant 1h)."""
-    if not api_key: 
-        return 0.92
-    try:
-        url = f"https://financialmodelingprep.com/api/v3/quote/EURUSD?apikey={api_key}"
-        res = requests.get(url, timeout=5).json()
-        if res and len(res) > 0:
-            # FMP donne EURUSD (ex: 1.08). Le prix USD en EUR = Prix / 1.08
-            return 1.0 / float(res[0]['price'])
-    except:
-        pass
-    return 0.92
-
 @st.cache_data(ttl=900, show_spinner=False)
-def get_info_ticker(ticker, api_key):
-    """Récupère les infos d'un Ticker via FMP (En cache pendant 15min)."""
-    t_str = str(ticker).upper().strip()
-    if not api_key:
-        return {"Nom": t_str, "Prix": 0.0, "Devise": "EUR", "Div": 0.0, "Objectif": 0.0, "Erreur": True}
+def get_market_data(liste_tickers):
+    """Télécharge TOUTES les actions en 1 seule requête HTTP directe pour éviter le blocage."""
+    resultats = {}
+    if not liste_tickers: 
+        return resultats
+    
+    # On nettoie la liste et on ajoute EUR=X pour le taux de conversion USD/EUR
+    tickers_propres = [str(t).upper().strip() for t in liste_tickers]
+    tickers_api = list(set(tickers_propres)) + ["EUR=X"]
+    tickers_str = ",".join(tickers_api)
+    
+    # Appel direct à l'API cachée de Yahoo (1 seule requête pour tout le portefeuille)
+    url = f"https://query1.finance.yahoo.com/v7/finance/quote?symbols={tickers_str}"
+    
+    # On se fait passer pour un navigateur classique
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
     
     try:
-        # 1. On tente de récupérer le profil complet (Nom, Prix, Devise, Dividende)
-        url = f"https://financialmodelingprep.com/api/v3/profile/{t_str}?apikey={api_key}"
-        resp = requests.get(url, timeout=5).json()
+        resp = requests.get(url, headers=headers, timeout=10)
+        data = resp.json().get("quoteResponse", {}).get("result", [])
         
-        if resp and len(resp) > 0:
-            data = resp[0]
-            return {
-                "Nom": data.get("companyName", t_str),
-                "Prix": float(data.get("price", 0.0)),
-                "Devise": data.get("currency", "EUR"),
-                "Div": float(data.get("lastDiv", 0.0)),
-                "Objectif": 0.0,
-                "Erreur": False
-            }
+        # 1. Isoler le taux de change
+        taux_usd_eur = 0.92
+        for item in data:
+            if item.get("symbol") == "EUR=X":
+                taux_usd_eur = item.get("regularMarketPrice", 0.92)
         
-        # 2. Si le profil n'existe pas (ex: certains ETF), on tente juste la cotation simple
-        url_quote = f"https://financialmodelingprep.com/api/v3/quote/{t_str}?apikey={api_key}"
-        resp_quote = requests.get(url_quote, timeout=5).json()
-        
-        if resp_quote and len(resp_quote) > 0:
-            data = resp_quote[0]
-            return {
-                "Nom": data.get("name", t_str),
-                "Prix": float(data.get("price", 0.0)),
-                "Devise": "EUR" if ".PA" in t_str else "USD", # Déduction pour la Bourse de Paris
-                "Div": 0.0,
-                "Objectif": 0.0,
-                "Erreur": False
-            }
+        # 2. Extraire les données des actions
+        for item in data:
+            sym = item.get("symbol")
+            if sym == "EUR=X": 
+                continue
             
-        return {"Nom": t_str, "Prix": 0.0, "Devise": "EUR", "Div": 0.0, "Objectif": 0.0, "Erreur": True}
+            devise = item.get("currency", "EUR")
+            coef = taux_usd_eur if devise == "USD" else 1
+            
+            nom_complet = item.get("shortName", item.get("longName", sym))
+            
+            resultats[sym] = {
+                "Nom": nom_complet,
+                "Prix": item.get("regularMarketPrice", 0.0) * coef,
+                "Div": item.get("trailingAnnualDividendRate", 0.0) * coef,
+                "Objectif": item.get("targetMeanPrice", 0.0) * coef,
+                "Erreur": False
+            }
     except Exception as e:
-        return {"Nom": t_str, "Prix": 0.0, "Devise": "EUR", "Div": 0.0, "Objectif": 0.0, "Erreur": True}
+        pass
+        
+    # Sécurité : Si une action n'a pas été trouvée, on met des 0 au lieu de faire planter
+    for t in tickers_propres:
+        if t not in resultats:
+            resultats[t] = {"Nom": t, "Prix": 0.0, "Div": 0.0, "Objectif": 0.0, "Erreur": True}
+            
+    return resultats
 
 # ==========================================
 # 1. FONCTIONS DE CONNEXION GOOGLE SHEETS
@@ -138,7 +139,7 @@ def charger_donnees():
         data = sheet.get_all_records(value_render_option='UNFORMATTED_VALUE')
         if not data: return []
         df_sheet = pd.DataFrame(data)
-        df_sheet.columns = df_sheet.columns.str.strip() # SÉCURITÉ
+        df_sheet.columns = df_sheet.columns.str.strip()
         for col in ["Quantité", "PRU"]:
             if col in df_sheet.columns:
                 df_sheet[col] = pd.to_numeric(df_sheet[col].astype(str).str.replace(',', '.'), errors='coerce')
@@ -205,13 +206,6 @@ except:
     est_autorise = False
     st.sidebar.error("Clé 'APP_PASSWORD' manquante.")
 
-# Ajout de la sécurité pour la Clé API FMP
-try:
-    api_key_fmp = st.secrets["FMP_API_KEY"]
-except:
-    api_key_fmp = ""
-    st.sidebar.warning("Clé API 'FMP_API_KEY' manquante dans les Secrets. Les cours resteront à zéro.")
-
 st.sidebar.divider()
 page = st.sidebar.radio("Navigation", ["Tableau de bord", "Journal des opérations", "Bilan comptable"])
 
@@ -261,20 +255,21 @@ if page == "Tableau de bord":
         df = pd.DataFrame(st.session_state.portefeuille)
         
         with st.spinner("Récupération des cours boursiers..."):
-            taux_usd = get_taux_change(api_key_fmp)
+            infos_marche = get_market_data(df["Ticker"].tolist())
+            
             cours_actuels, dividendes, objectifs, noms = [], [], [], []
             
             for ticker in df["Ticker"]:
-                info = get_info_ticker(ticker, api_key_fmp)
+                sym = str(ticker).upper().strip()
+                info = infos_marche[sym]
                 
                 if info["Erreur"]:
-                    st.toast(f"Impossible d'actualiser {ticker}")
+                    st.toast(f"Impossible d'actualiser {sym}")
                     
-                coef = taux_usd if info["Devise"] == "USD" else 1
                 noms.append(info["Nom"])
-                cours_actuels.append(info["Prix"] * coef)
-                dividendes.append(info["Div"] * coef)
-                objectifs.append(info["Objectif"] * coef)
+                cours_actuels.append(info["Prix"])
+                dividendes.append(info["Div"])
+                objectifs.append(info["Objectif"])
 
         df["Nom"] = noms
         df["Cours Actuel (€)"] = cours_actuels
@@ -314,7 +309,7 @@ if page == "Tableau de bord":
             f1, f2, f3 = st.columns([2, 1, 1])
             rech = f1.text_input("Rechercher un actif", placeholder="Ex: LVMH, AI.PA...")
             f_cpte = f2.selectbox("Filtrer Compte", ["Tous"] + LISTE_COMPTES)
-            f_perf = f3.selectbox("Performance", ["Toutes", "Gagnantes", "Perdantes"])
+            f_perf = f3.selectbox("Statut performance", ["Toutes", "Gagnantes", "Perdantes"])
 
             df_f = df.copy()
             if rech: df_f = df_f[df_f["Ticker"].str.contains(rech, case=False) | df_f["Nom"].str.contains(rech, case=False)]
@@ -335,13 +330,13 @@ if page == "Tableau de bord":
         g1, g2 = st.columns(2)
         with g1:
             with st.container(border=True):
-                st.markdown("### Répartition")
+                st.markdown("### Répartition par actif")
                 fig_pie = px.sunburst(df_f, path=['Compte', 'Ticker'], values='Valeur Actuelle (€)')
                 fig_pie.update_layout(height=380, margin=dict(t=10, l=10, r=10, b=10), paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
                 st.plotly_chart(fig_pie, use_container_width=True)
         with g2:
             with st.container(border=True):
-                st.markdown("### Gains et pertes")
+                st.markdown("### Gains et pertes par ligne")
                 df_b = df_f.sort_values("Plus-Value (€)", ascending=False)
                 fig_bar = px.bar(df_b, x="Ticker", y="Plus-Value (€)", color=df_b["Plus-Value (€)"] >= 0, 
                              color_discrete_map={True: "#1e8e3e", False: "#d93025"}, text_auto='.0f')
@@ -356,23 +351,24 @@ elif page == "Journal des opérations":
     if est_autorise:
         with st.container(border=True):
             with st.form("t_form", clear_on_submit=True):
-                st.write("Nouvelle transaction")
+                st.markdown("### Enregistrer une nouvelle transaction")
                 ca, cb, cc = st.columns(3)
-                dt = ca.date_input("Date")
-                mt = cb.selectbox("Type", LISTE_MOTIFS)
-                tk = cc.text_input("Symbole")
+                dt = ca.date_input("Date de la transaction")
+                mt = cb.selectbox("Type d'opération", LISTE_MOTIFS)
+                tk = cc.text_input("Symbole (ou 'CASH')")
                 cd, ce, cf = st.columns(3)
                 qt = cd.text_input("Quantité", "0")
-                px_u = ce.text_input("Prix Unit.", "0")
-                fr = cf.text_input("Frais", "0")
-                cp = st.selectbox("Compte", LISTE_COMPTES)
-                if st.form_submit_button("Valider"):
+                px_u = ce.text_input("Prix Unitaire (€)", "0")
+                fr = cf.text_input("Frais de courtage (€)", "0")
+                cp = st.selectbox("Compte impacté", LISTE_COMPTES)
+                if st.form_submit_button("Valider la transaction"):
                     ajouter_transaction(dt.strftime("%d/%m/%Y"), mt, tk.upper(), float(qt.replace(',','.')), float(px_u.replace(',','.')), float(fr.replace(',','.')), cp)
                     st.rerun()
 
     df_t = charger_transactions()
     if not df_t.empty:
         with st.container(border=True):
+            st.markdown("### Historique complet")
             r = st.text_input("Filtrer l'historique", placeholder="Chercher un ticker, une date, un motif...")
             df_ta = df_t.copy()
             if r:
@@ -380,9 +376,13 @@ elif page == "Journal des opérations":
                 df_ta = df_ta[mask]
             
             if est_autorise and not r:
+                st.info("Vous pouvez éditer ou supprimer une ligne directement dans le tableau ci-dessous.")
                 df_mod = st.data_editor(df_ta, num_rows="dynamic", use_container_width=True, hide_index=True)
                 if not df_ta.equals(df_mod):
                     sauvegarder_transactions(df_mod); st.rerun()
+            elif est_autorise and r:
+                st.caption("Mode édition désactivé pendant la recherche.")
+                st.dataframe(df_ta, use_container_width=True, hide_index=True)
             else:
                 st.dataframe(df_ta, use_container_width=True, hide_index=True)
 
@@ -390,7 +390,7 @@ elif page == "Journal des opérations":
 # PAGE 3 : BILAN COMPTABLE
 # ==========================================
 elif page == "Bilan comptable":
-    st.title("Bilan de performance")
+    st.title("Bilan de performance globale")
     df_t = charger_transactions()
     if not df_t.empty:
         for c in ["Quantité", "Prix", "Frais"]: 
@@ -399,11 +399,14 @@ elif page == "Bilan comptable":
         df_c = df_t[df_t["Ticker"].str.upper() == "CASH"]
         dep = df_c[df_c["Type"] == "DÉPÔT"]["Prix"].sum()
         ret = df_c[df_c["Type"].isin(["RETRAIT", "PAIEMENT"])]["Prix"].sum()
+        net_injecte = dep - ret
         
-        k1, k2, k3 = st.columns(3)
+        st.markdown("### Flux de trésorerie")
+        k1, k2, k3, k4 = st.columns(4)
         k1.metric("Dépôts totaux", f"{dep:,.2f} €".replace(',', ' '))
         k2.metric("Retraits / Impôts", f"- {ret:,.2f} €".replace(',', ' '))
-        k3.metric("Capital Net Injecté", f"{(dep-ret):,.2f} €".replace(',', ' '))
+        k3.metric("Capital Net Injecté", f"{net_injecte:,.2f} €".replace(',', ' '))
+        k4.metric("Frais de courtage", f"{df_t['Frais'].sum():,.2f} €".replace(',', ' '))
         
         st.write("")
         
@@ -411,9 +414,11 @@ elif page == "Bilan comptable":
         if not df_a.empty:
             rec = []
             with st.spinner("Calcul des performances..."):
-                taux_usd = get_taux_change(api_key_fmp)
+                tickers_actifs = df_a["Ticker"].unique().tolist()
+                infos_marche = get_market_data(tickers_actifs)
                 
-                for t in df_a["Ticker"].unique():
+                for t in tickers_actifs:
+                    sym = str(t).upper().strip()
                     dft = df_a[df_a["Ticker"] == t]
                     ach = dft[dft["Type"] == "ACHAT"]
                     ven = dft[dft["Type"] == "VENTE"]
@@ -425,15 +430,9 @@ elif page == "Bilan comptable":
                     sq = ach["Quantité"].sum() - ven["Quantité"].sum()
                     frais_tot = dft["Frais"].sum()
                     
-                    prix_act = 0
-                    
-                    # On récupère l'info pour avoir le VRAI nom de l'entreprise
-                    info = get_info_ticker(t, api_key_fmp)
+                    info = infos_marche[sym]
                     nom_entreprise = info["Nom"]
-                    
-                    if sq > 0.0001:
-                        coef = taux_usd if info["Devise"] == "USD" else 1
-                        prix_act = info["Prix"] * coef
+                    prix_act = info["Prix"] if sq > 0.0001 else 0.0
                     
                     val = sq * prix_act
                     pnl = (val + v_ven + v_div) - (v_ach + frais_tot)
@@ -447,6 +446,7 @@ elif page == "Bilan comptable":
             
             df_recap = pd.DataFrame(rec)
             
+            st.markdown("### Résultat net d'investissement")
             tot_pnl = df_recap["Gain / Perte Total (€)"].sum()
             tot_achete = df_recap["Acheté (€)"].sum()
             tot_pnl_pct = (tot_pnl / tot_achete * 100) if tot_achete > 0 else 0
