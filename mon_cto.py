@@ -337,44 +337,37 @@ elif page == "Journal des opérations":
 
     df_t = charger_transactions()
     if not df_t.empty:
-        # --- CALCUL BRUT DU SOLDE ESPÈCES (SELON TA FORMULE) ---
+        # --- CALCUL BRUT DU SOLDE ESPÈCES TOTAL (TOUS COMPTES CONFONDUS) ---
         df_calc = df_t.copy()
         for c in ["Quantité", "Prix", "Frais"]: 
             df_calc[c] = pd.to_numeric(df_calc[c].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
         
-        soldes = {}
-        for compte in df_calc["Compte"].unique():
-            df_c = df_calc[df_calc["Compte"] == compte]
-            entrees = 0
-            sorties = 0
+        entrees = 0
+        sorties = 0
+        
+        for _, r in df_calc.iterrows():
+            t = r["Type"]
+            # Calcul du vrai montant (Volume) de la ligne
+            if t in ["ACHAT", "VENTE"]:
+                montant = r["Quantité"] * r["Prix"]
+            elif t == "DIVIDENDE":
+                montant = (r["Quantité"] * r["Prix"]) if r["Quantité"] > 1 else r["Prix"]
+            else:
+                montant = r["Prix"]
             
-            for _, r in df_c.iterrows():
-                t = r["Type"]
-                # Calcul du vrai montant (Volume) de la ligne
-                if t in ["ACHAT", "VENTE"]:
-                    montant = r["Quantité"] * r["Prix"]
-                elif t == "DIVIDENDE":
-                    montant = (r["Quantité"] * r["Prix"]) if r["Quantité"] > 1 else r["Prix"]
-                else:
-                    montant = r["Prix"]
-                
-                # Application stricte de ta formule
-                if t in ["DÉPÔT", "DIVIDENDE", "VENTE"]:
-                    entrees += montant
-                elif t in ["ACHAT", "PAIEMENT", "RETRAIT"]:
-                    sorties += montant
+            # Application stricte de ta formule
+            if t in ["DÉPÔT", "DIVIDENDE", "VENTE"]:
+                entrees += montant
+            elif t in ["ACHAT", "PAIEMENT", "RETRAIT"]:
+                sorties += montant
+        
+        # Formule finale : Entrées - Sorties - Frais
+        frais_totaux = df_calc["Frais"].sum()
+        solde_global = entrees - sorties - frais_totaux
             
-            # Formule finale : Entrées - Sorties - Frais
-            frais_totaux = df_c["Frais"].sum()
-            solde_final = entrees - sorties - frais_totaux
-            soldes[compte] = solde_final
-            
-        if soldes:
-            st.markdown("### 💶 Liquidités théoriques")
-            cols = st.columns(len(soldes))
-            for i, (cpte, s) in enumerate(soldes.items()):
-                cols[i].metric(f"Solde espèces {cpte}", f"{s:,.2f} €".replace(',', ' '))
-            st.write("")
+        st.markdown("### 💶 Liquidités théoriques")
+        st.metric("Solde espèces total", f"{solde_global:,.2f} €".replace(',', ' '))
+        st.write("")
         # --------------------------------------------------------
 
         with st.container(border=True):
