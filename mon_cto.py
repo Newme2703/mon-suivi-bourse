@@ -368,6 +368,23 @@ elif page == "Journal des opérations":
         st.markdown("### 💶 Liquidités théoriques")
         st.metric("Solde espèces total", f"{solde_global:,.2f} €".replace(',', ' '))
         st.write("")
+
+        # --- BLOC DE DÉBOGAGE TEMPORAIRE ---
+        with st.expander("🔍 Voir le détail du calcul (Radar à erreur)"):
+            tot_depots = df_calc[df_calc["Type"] == "DÉPÔT"]["Prix"].sum()
+            tot_retraits = df_calc[df_calc["Type"].isin(["RETRAIT", "PAIEMENT"])]["Prix"].sum()
+            tot_achats = (df_calc[df_calc["Type"] == "ACHAT"]["Quantité"] * df_calc[df_calc["Type"] == "ACHAT"]["Prix"]).sum()
+            tot_ventes = (df_calc[df_calc["Type"] == "VENTE"]["Quantité"] * df_calc[df_calc["Type"] == "VENTE"]["Prix"]).sum()
+            tot_divs = df_calc[df_calc["Type"] == "DIVIDENDE"].apply(lambda r: (r["Quantité"] * r["Prix"]) if r["Quantité"] > 1 else r["Prix"], axis=1).sum()
+            
+            c_d1, c_d2, c_d3 = st.columns(3)
+            c_d1.write(f"**Total Dépôts purs :** {tot_depots:.2f} €")
+            c_d1.write(f"**Total Retraits purs :** {tot_retraits:.2f} €")
+            c_d2.write(f"**Total Achats bruts :** {tot_achats:.2f} €")
+            c_d2.write(f"**Total Ventes brutes :** {tot_ventes:.2f} €")
+            c_d3.write(f"**Total Dividendes :** {tot_divs:.2f} €")
+            c_d3.write(f"**Total TOUS Frais :** {frais_totaux:.2f} €")
+            
         # --------------------------------------------------------
 
         with st.container(border=True):
