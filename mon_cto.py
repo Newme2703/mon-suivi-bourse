@@ -318,7 +318,6 @@ if page == "Tableau de bord":
 # ==========================================
 elif page == "Journal des opérations":
     st.title("Journal des opérations")
-    
     if est_autorise:
         with st.container(border=True):
             with st.form("t_form", clear_on_submit=True):
@@ -338,51 +337,46 @@ elif page == "Journal des opérations":
 
     df_t = charger_transactions()
     if not df_t.empty:
-        
-        # --- NOUVEAU BLOC : CALCUL DES SOLDES ESPÈCES ---
+        # --- CALCUL BRUT DU SOLDE ESPÈCES (SELON TA FORMULE) ---
         df_calc = df_t.copy()
         for c in ["Quantité", "Prix", "Frais"]: 
             df_calc[c] = pd.to_numeric(df_calc[c].astype(str).str.replace(',', '.'), errors='coerce').fillna(0)
         
-        soldes_especes = {}
+        soldes = {}
         for compte in df_calc["Compte"].unique():
-            df_cpte = df_calc[df_calc["Compte"] == compte]
+            df_c = df_calc[df_calc["Compte"] == compte]
+            entrees = 0
+            sorties = 0
             
-            # Mouvements de cash purs (Dépôts / Retraits)
-            df_c = df_cpte[df_cpte["Ticker"].str.upper() == "CASH"]
-            dep = df_c[df_c["Type"] == "DÉPÔT"]["Prix"].sum()
-            ret = df_c[df_c["Type"].isin(["RETRAIT", "PAIEMENT"])]["Prix"].sum()
-            
-            # Mouvements d'actifs (Achats / Ventes / Dividendes)
-            df_a = df_cpte[df_cpte["Ticker"].str.upper() != "CASH"]
-            achats = (df_a[df_a["Type"] == "ACHAT"]["Quantité"] * df_a[df_a["Type"] == "ACHAT"]["Prix"]).sum()
-            ventes = (df_a[df_a["Type"] == "VENTE"]["Quantité"] * df_a[df_a["Type"] == "VENTE"]["Prix"]).sum()
-            
-            divs = df_a[df_a["Type"] == "DIVIDENDE"]
-            dividendes = divs.apply(lambda r: (r["Quantité"] * r["Prix"]) if r["Quantité"] > 1 else r["Prix"], axis=1).sum()
-            
-            # Tous les frais cumulés
-            frais = df_cpte["Frais"].sum()
-            
-            # Calcul du solde final
-            solde = dep - ret - achats + ventes + dividendes - frais
-            
-            # On stocke le résultat s'il y a eu des mouvements sur ce compte
-            if not df_cpte.empty: 
-                soldes_especes[compte] = solde
+            for _, r in df_c.iterrows():
+                t = r["Type"]
+                # Calcul du vrai montant (Volume) de la ligne
+                if t in ["ACHAT", "VENTE"]:
+                    montant = r["Quantité"] * r["Prix"]
+                elif t == "DIVIDENDE":
+                    montant = (r["Quantité"] * r["Prix"]) if r["Quantité"] > 1 else r["Prix"]
+                else:
+                    montant = r["Prix"]
                 
-        # AFFICHAGE DES MÉTRIQUES DE CASH
-        if soldes_especes:
-            st.markdown("### 💶 Liquidités disponibles (Solde espèces)")
-            # Crée dynamiquement autant de colonnes qu'il y a de comptes actifs
-            cols_liquidites = st.columns(len(soldes_especes))
-            for i, (cpte, solde) in enumerate(soldes_especes.items()):
-                cols_liquidites[i].metric(f"Compte {cpte}", f"{solde:,.2f} €".replace(',', ' '))
+                # Application stricte de ta formule
+                if t in ["DÉPÔT", "DIVIDENDE", "VENTE"]:
+                    entrees += montant
+                elif t in ["ACHAT", "PAIEMENT", "RETRAIT"]:
+                    sorties += montant
             
-            st.write("") # Petit espace visuel avant le tableau
-        # --------------------------------------------------
+            # Formule finale : Entrées - Sorties - Frais
+            frais_totaux = df_c["Frais"].sum()
+            solde_final = entrees - sorties - frais_totaux
+            soldes[compte] = solde_final
+            
+        if soldes:
+            st.markdown("### 💶 Liquidités théoriques")
+            cols = st.columns(len(soldes))
+            for i, (cpte, s) in enumerate(soldes.items()):
+                cols[i].metric(f"Solde espèces {cpte}", f"{s:,.2f} €".replace(',', ' '))
+            st.write("")
+        # --------------------------------------------------------
 
-        # --- TABLEAU D'HISTORIQUE ---
         with st.container(border=True):
             r = st.text_input("Filtrer l'historique", placeholder="Chercher un ticker, une date, un motif...")
             df_ta = df_t.copy()
