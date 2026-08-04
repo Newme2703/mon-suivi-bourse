@@ -464,7 +464,8 @@ elif page == "Bilan comptable":
             
             tot_pnl = df_recap["Gain / Perte Total (€)"].sum()
             tot_achete = df_recap["Acheté (€)"].sum()
-            tot_pnl_pct = (tot_pnl / tot_achete * 100) if tot_achete > 0 else 0
+            capital_net = dep - ret
+            tot_pnl_pct = (tot_pnl / capital_net * 100) if capital_net > 0 else 0
             
             m1, m2, m3 = st.columns(3)
             m1.metric("Plus-value globale nette", f"{tot_pnl:,.2f} €".replace(',', ' '))
